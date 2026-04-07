@@ -22,6 +22,7 @@ except ImportError as e:
 
 # ────────── 설정 ──────────
 DEFAULT_START_KEY = "f6"
+DEFAULT_RECORD_KEY = "f3"
 DEFAULT_CONFIDENCE = 0.8
 SCAN_INTERVAL = 0.1  # 초
 
@@ -114,11 +115,12 @@ class CheDetect:
         self.root.title(f"cheDetect v{VERSION}")
         self.root.resizable(False, False)
 
-        self.records = []   # {"name", "image_path", "yes_to", "no_to", "confidence"}
+        self.records = []   # {"type": "image"|"click", ...}
         self.region = None  # (x1, y1, x2, y2)
         self.running = False
         self.macro_thread = None
         self.start_key = DEFAULT_START_KEY
+        self.record_key = DEFAULT_RECORD_KEY
         self._live_preview_running = False
         self._live_preview_thread = None
         self._region_preview_img = None
@@ -155,7 +157,7 @@ class CheDetect:
         frame_table = tk.LabelFrame(frame_left, text="레코드")
         frame_table.pack(padx=10, pady=5, fill="both")
 
-        columns = ("#", "이름", "이미지", "YES→", "NO→", "정확도")
+        columns = ("#", "이름", "내용", "YES→", "NO→", "정확도")
         self.tree = ttk.Treeview(frame_table, columns=columns, show="headings",
                                   height=8, selectmode="browse")
         widths = [30, 80, 160, 60, 60, 60]
@@ -187,7 +189,12 @@ class CheDetect:
         tk.Label(frame_keys, text="시작/종료:").grid(row=0, column=0, padx=5, pady=3)
         self.start_key_var = tk.StringVar(value=self.start_key.upper())
         tk.Entry(frame_keys, textvariable=self.start_key_var, width=8).grid(row=0, column=1, padx=5)
-        tk.Button(frame_keys, text="적용", command=self._apply_key).grid(row=0, column=2, padx=5)
+
+        tk.Label(frame_keys, text="클릭 기록:").grid(row=0, column=2, padx=5, pady=3)
+        self.record_key_var = tk.StringVar(value=self.record_key.upper())
+        tk.Entry(frame_keys, textvariable=self.record_key_var, width=8).grid(row=0, column=3, padx=5)
+
+        tk.Button(frame_keys, text="적용", command=self._apply_key).grid(row=0, column=4, padx=5)
 
         # ── 상태 ──
         self.status_var = tk.StringVar(value="⏹ 대기 중")
@@ -257,16 +264,33 @@ class CheDetect:
     def _refresh_table(self):
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.records):
-            img_name = os.path.basename(r["image_path"]) if r["image_path"] else "없음"
+            rtype = r.get("type", "image")
+            if rtype == "click":
+                content = f"x:{r.get('click_x',0)}  y:{r.get('click_y',0)}"
+                conf_label = "-"
+            else:
+                content = os.path.basename(r.get("image_path", "")) or "없음"
+                conf_label = f"{int(r.get('confidence', DEFAULT_CONFIDENCE) * 100)}%"
             yes_label = str(r["yes_to"] + 1) if r["yes_to"] is not None else "종료"
             no_label = str(r["no_to"] + 1) if r["no_to"] is not None else "종료"
-            self.tree.insert("", "end", values=(
-                i + 1, r["name"], img_name, yes_label, no_label,
-                f"{int(r['confidence'] * 100)}%"
-            ))
+            self.tree.insert("", "end", values=(i + 1, r["name"], content, yes_label, no_label, conf_label))
 
     def _add_record(self):
         RecordDialog(self.root, self.records, None, self._refresh_table)
+
+    def _add_click_record(self):
+        x, y = pyautogui.position()
+        count = len(self.records)
+        record = {
+            "type": "click",
+            "name": "클릭",
+            "click_x": x,
+            "click_y": y,
+            "yes_to": 0 if count > 0 else None,
+            "no_to": None,
+        }
+        self.records.append(record)
+        self._refresh_table()
 
     def _edit_record(self):
         selected = self.tree.selection()
@@ -313,13 +337,15 @@ class CheDetect:
         try:
             keyboard.unhook_all()
             keyboard.add_hotkey(self.start_key, self._toggle)
+            keyboard.add_hotkey(self.record_key, self._add_click_record)
         except Exception as e:
             print(f"단축키 등록 실패: {e}")
 
     def _apply_key(self):
         self.start_key = self.start_key_var.get().lower()
+        self.record_key = self.record_key_var.get().lower()
         self._register_hotkeys()
-        messagebox.showinfo("단축키", f"적용됨: {self.start_key.upper()}")
+        messagebox.showinfo("단축키", f"시작/종료: {self.start_key.upper()}  클릭기록: {self.record_key.upper()}")
 
     # ── 저장 / 불러오기 ──
     def _save(self):
@@ -331,6 +357,7 @@ class CheDetect:
         if path:
             data = {
                 "start_key": self.start_key,
+                "record_key": self.record_key,
                 "region": self.region,
                 "records": self.records
             }
@@ -349,7 +376,9 @@ class CheDetect:
             self.records = data.get("records", [])
             self.region = data.get("region")
             self.start_key = data.get("start_key", DEFAULT_START_KEY)
+            self.record_key = data.get("record_key", DEFAULT_RECORD_KEY)
             self.start_key_var.set(self.start_key.upper())
+            self.record_key_var.set(self.record_key.upper())
             if self.region:
                 r = self.region
                 self.region_var.set(f"({r[0]}, {r[1]}) ~ ({r[2]}, {r[3]})")
@@ -391,20 +420,26 @@ class CheDetect:
                 break
 
             record = self.records[current_idx]
-            found = self._find_image(record)
+            rtype = record.get("type", "image")
 
-            if found:
-                # 클릭
-                cx = (found[0] + found[2]) // 2
-                cy = (found[1] + found[3]) // 2
-                pyautogui.click(cx, cy)
+            if rtype == "click":
+                pyautogui.click(record["click_x"], record["click_y"])
                 self.root.after(0, lambda r=record, i=current_idx:
-                                self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
+                                self.status_var.set(f"▶ [{i+1}] {r['name']} - 클릭 ({r['click_x']},{r['click_y']})"))
                 next_idx = record["yes_to"]
             else:
-                self.root.after(0, lambda r=record, i=current_idx:
-                                self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
-                next_idx = record["no_to"]
+                found = self._find_image(record)
+                if found:
+                    cx = (found[0] + found[2]) // 2
+                    cy = (found[1] + found[3]) // 2
+                    pyautogui.click(cx, cy)
+                    self.root.after(0, lambda r=record, i=current_idx:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
+                    next_idx = record["yes_to"]
+                else:
+                    self.root.after(0, lambda r=record, i=current_idx:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
+                    next_idx = record["no_to"]
 
             if next_idx is None:
                 self._stop_from_thread()
@@ -469,7 +504,8 @@ class RecordDialog:
         if edit_idx is not None:
             r = records[edit_idx]
         else:
-            r = {"name": "", "image_path": "", "yes_to": 0, "no_to": None, "confidence": DEFAULT_CONFIDENCE}
+            r = {"type": "image", "name": "", "image_path": "", "yes_to": 0,
+                 "no_to": None, "confidence": DEFAULT_CONFIDENCE}
 
         pad = {"padx": 8, "pady": 4}
 
@@ -516,9 +552,38 @@ class RecordDialog:
         self.conf_var = tk.StringVar(value=str(int(r["confidence"] * 100)))
         tk.Entry(frame_left, textvariable=self.conf_var, width=8).grid(row=4, column=1, sticky="w", **pad)
 
+        # 클릭 여부
+        frame_click = tk.LabelFrame(frame_left, text="클릭")
+        frame_click.grid(row=5, column=0, columnspan=4, padx=8, pady=4, sticky="ew")
+
+        self.click_var = tk.StringVar(value="사용" if r.get("click_enabled") else "미사용")
+        click_cb = ttk.Combobox(frame_click, textvariable=self.click_var,
+                                 values=["미사용", "사용"], width=7, state="readonly")
+        click_cb.grid(row=0, column=0, padx=6, pady=4)
+
+        tk.Label(frame_click, text="X:").grid(row=0, column=1, padx=(6, 2))
+        self.click_x_var = tk.StringVar(value=str(r.get("click_x", 0)))
+        self.click_x_entry = tk.Entry(frame_click, textvariable=self.click_x_var, width=6)
+        self.click_x_entry.grid(row=0, column=2, padx=2)
+
+        tk.Label(frame_click, text="Y:").grid(row=0, column=3, padx=(6, 2))
+        self.click_y_var = tk.StringVar(value=str(r.get("click_y", 0)))
+        self.click_y_entry = tk.Entry(frame_click, textvariable=self.click_y_var, width=6)
+        self.click_y_entry.grid(row=0, column=4, padx=2)
+
+        tk.Button(frame_click, text="현재위치", command=self._pick_click_pos).grid(row=0, column=5, padx=6)
+
+        def _toggle_click_fields(*_):
+            state = "normal" if self.click_var.get() == "사용" else "disabled"
+            self.click_x_entry.config(state=state)
+            self.click_y_entry.config(state=state)
+
+        self.click_var.trace_add("write", _toggle_click_fields)
+        _toggle_click_fields()
+
         # 버튼
         frame_btn = tk.Frame(frame_left)
-        frame_btn.grid(row=5, column=0, columnspan=4, pady=8)
+        frame_btn.grid(row=6, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
 
@@ -595,6 +660,7 @@ class RecordDialog:
         no_to = int(no_val) - 1 if no_val != "종료" else None
 
         record = {
+            "type": "image",
             "name": name,
             "image_path": img_path,
             "yes_to": yes_to,

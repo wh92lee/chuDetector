@@ -7,12 +7,13 @@ import time
 import json
 import os
 import sys
+import tempfile
 
 try:
     import pyautogui
     import cv2
     import numpy as np
-    from PIL import ImageGrab
+    from PIL import ImageGrab, Image, ImageTk
     import keyboard
     pyautogui.PAUSE = 0
     pyautogui.FAILSAFE = False
@@ -27,8 +28,14 @@ SCAN_INTERVAL = 0.1  # 초
 
 # ────────── 영역 선택 오버레이 ──────────
 class RegionSelector:
-    def __init__(self, callback):
+    """드래그로 화면 영역을 선택하는 오버레이.
+    mode="region" : 좌표 튜플 반환
+    mode="capture": 해당 영역을 캡처해 저장 경로 반환
+    """
+    def __init__(self, callback, mode="region", save_dir=None):
         self.callback = callback
+        self.mode = mode
+        self.save_dir = save_dir or tempfile.gettempdir()
         self.start_x = self.start_y = 0
         self.rect = None
 
@@ -47,7 +54,8 @@ class RegionSelector:
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.root.bind("<Escape>", lambda e: self.root.destroy())
 
-        label = tk.Label(self.root, text="드래그하여 감지 영역 선택 (ESC: 취소)",
+        hint = "드래그하여 캡처 영역 선택" if mode == "capture" else "드래그하여 감지 영역 선택"
+        label = tk.Label(self.root, text=f"{hint} (ESC: 취소)",
                          fg="white", bg="black", font=("Arial", 14))
         label.place(relx=0.5, rely=0.02, anchor="n")
 
@@ -73,8 +81,20 @@ class RegionSelector:
         x2 = max(self.start_x, event.x_root)
         y2 = max(self.start_y, event.y_root)
         self.root.destroy()
-        if x2 - x1 > 5 and y2 - y1 > 5:
+        if x2 - x1 < 5 or y2 - y1 < 5:
+            return
+
+        if self.mode == "capture":
+            # 오버레이 닫힌 후 잠시 대기 후 캡처
+            self.root.after(150, lambda: self._do_capture(x1, y1, x2, y2))
+        else:
             self.callback((x1, y1, x2, y2))
+
+    def _do_capture(self, x1, y1, x2, y2):
+        img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        path = os.path.join(self.save_dir, f"capture_{int(time.time()*1000)}.png")
+        img.save(path)
+        self.callback(path)
 
 
 # ────────── 메인 앱 ──────────
@@ -393,16 +413,26 @@ class RecordDialog:
         # 이름
         tk.Label(self.win, text="이름:").grid(row=0, column=0, sticky="e", **pad)
         self.name_var = tk.StringVar(value=r["name"])
-        tk.Entry(self.win, textvariable=self.name_var, width=25).grid(row=0, column=1, columnspan=2, **pad)
+        tk.Entry(self.win, textvariable=self.name_var, width=25).grid(row=0, column=1, columnspan=3, **pad)
 
-        # 이미지
+        # 이미지 경로
         tk.Label(self.win, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
         self.img_var = tk.StringVar(value=r["image_path"])
+        self.img_var.trace_add("write", lambda *_: self._update_preview())
         tk.Entry(self.win, textvariable=self.img_var, width=20).grid(row=1, column=1, **pad)
-        tk.Button(self.win, text="찾기", command=self._browse_image).grid(row=1, column=2, **pad)
+        tk.Button(self.win, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
+        tk.Button(self.win, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
+
+        # 미리보기
+        self.preview_label = tk.Label(self.win, text="미리보기 없음", bg="#e0e0e0",
+                                      width=20, height=5, relief="sunken")
+        self.preview_label.grid(row=2, column=0, columnspan=4, padx=8, pady=4, sticky="ew")
+        self._preview_img = None
+        if r["image_path"] and os.path.exists(r["image_path"]):
+            self._update_preview()
 
         # YES → 이동
-        tk.Label(self.win, text="YES → 레코드:").grid(row=2, column=0, sticky="e", **pad)
+        tk.Label(self.win, text="YES → 레코드:").grid(row=3, column=0, sticky="e", **pad)
         yes_options = [str(i + 1) for i in range(self.count)] + ["종료"]
         self.yes_var = tk.StringVar()
         if r["yes_to"] is not None and r["yes_to"] < self.count:
@@ -410,10 +440,10 @@ class RecordDialog:
         else:
             self.yes_var.set("종료")
         ttk.Combobox(self.win, textvariable=self.yes_var, values=yes_options, width=8,
-                     state="readonly").grid(row=2, column=1, sticky="w", **pad)
+                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
 
         # NO → 이동
-        tk.Label(self.win, text="NO → 레코드:").grid(row=3, column=0, sticky="e", **pad)
+        tk.Label(self.win, text="NO → 레코드:").grid(row=4, column=0, sticky="e", **pad)
         no_options = [str(i + 1) for i in range(self.count)] + ["종료"]
         self.no_var = tk.StringVar()
         if r["no_to"] is not None and r["no_to"] < self.count:
@@ -421,16 +451,16 @@ class RecordDialog:
         else:
             self.no_var.set("종료")
         ttk.Combobox(self.win, textvariable=self.no_var, values=no_options, width=8,
-                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
+                     state="readonly").grid(row=4, column=1, sticky="w", **pad)
 
         # 정확도
-        tk.Label(self.win, text="정확도 (%):").grid(row=4, column=0, sticky="e", **pad)
+        tk.Label(self.win, text="정확도 (%):").grid(row=5, column=0, sticky="e", **pad)
         self.conf_var = tk.StringVar(value=str(int(r["confidence"] * 100)))
-        tk.Entry(self.win, textvariable=self.conf_var, width=8).grid(row=4, column=1, sticky="w", **pad)
+        tk.Entry(self.win, textvariable=self.conf_var, width=8).grid(row=5, column=1, sticky="w", **pad)
 
         # 버튼
         frame_btn = tk.Frame(self.win)
-        frame_btn.grid(row=5, column=0, columnspan=3, pady=8)
+        frame_btn.grid(row=6, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
 
@@ -441,6 +471,28 @@ class RecordDialog:
         )
         if path:
             self.img_var.set(path)
+
+    def _capture_image(self):
+        self.win.withdraw()
+        time.sleep(0.2)
+        RegionSelector(self._on_captured, mode="capture")
+
+    def _on_captured(self, path):
+        self.win.deiconify()
+        self.img_var.set(path)
+
+    def _update_preview(self):
+        path = self.img_var.get().strip()
+        if not path or not os.path.exists(path):
+            self.preview_label.config(image="", text="미리보기 없음")
+            return
+        try:
+            img = Image.open(path)
+            img.thumbnail((200, 100))
+            self._preview_img = ImageTk.PhotoImage(img)
+            self.preview_label.config(image=self._preview_img, text="")
+        except Exception:
+            self.preview_label.config(image="", text="이미지 로드 실패")
 
     def _apply(self):
         name = self.name_var.get().strip()

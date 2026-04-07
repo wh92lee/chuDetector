@@ -67,6 +67,9 @@ class RegionSelector:
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.canvas.bind("<Escape>", lambda e: self.root.destroy())
+        self.canvas.focus_set()
+        self.root.grab_set()
 
     def _on_press(self, event):
         self.start_x = event.x
@@ -522,8 +525,7 @@ class RecordDialog:
 
     def _capture_image(self):
         self.win.withdraw()
-        time.sleep(0.2)
-        RegionSelector(self._on_captured, mode="capture")
+        self.win.after(200, lambda: RegionSelector(self._on_captured, mode="capture"))
 
     def _on_captured(self, path):
         self.win.deiconify()

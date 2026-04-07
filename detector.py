@@ -542,11 +542,13 @@ class RecordDialog:
             self.img_var.set(path)
 
     def _capture_image(self):
+        self.win.grab_release()
         self.win.withdraw()
         self.win.after(200, lambda: RegionSelector(self._on_captured, mode="capture"))
 
     def _on_captured(self, path):
         self.win.deiconify()
+        self.win.grab_set()
         self.img_var.set(path)
 
     def _update_preview(self):

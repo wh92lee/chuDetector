@@ -39,59 +39,66 @@ class RegionSelector:
         self.start_x = self.start_y = 0
         self.rect = None
 
-        self.root = tk.Toplevel()
-        self.root.attributes("-fullscreen", True)
-        self.root.attributes("-alpha", 0.3)
-        self.root.attributes("-topmost", True)
-        self.root.configure(bg="black")
-        self.root.title("영역 선택")
+        # 먼저 화면 전체 스크린샷 찍기
+        self._screenshot = ImageGrab.grab()
+        sw, sh = self._screenshot.size
 
-        self.canvas = tk.Canvas(self.root, cursor="cross", bg="black", highlightthickness=0)
+        self.root = tk.Toplevel()
+        self.root.overrideredirect(True)
+        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.attributes("-topmost", True)
+        self.root.lift()
+        self.root.focus_force()
+
+        self.canvas = tk.Canvas(self.root, cursor="cross", highlightthickness=0,
+                                 width=sw, height=sh)
         self.canvas.pack(fill="both", expand=True)
+
+        # 스크린샷을 배경으로 표시 (반투명 효과)
+        self._bg_img = ImageTk.PhotoImage(self._screenshot.convert("RGBA")
+                                           .point(lambda p: int(p * 0.5)))
+        self.canvas.create_image(0, 0, anchor="nw", image=self._bg_img)
+
+        hint = "드래그하여 캡처 영역 선택" if mode == "capture" else "드래그하여 감지 영역 선택"
+        self.canvas.create_text(sw // 2, 20, text=f"{hint}  (ESC: 취소)",
+                                 fill="white", font=("Arial", 14, "bold"))
 
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.root.bind("<Escape>", lambda e: self.root.destroy())
 
-        hint = "드래그하여 캡처 영역 선택" if mode == "capture" else "드래그하여 감지 영역 선택"
-        label = tk.Label(self.root, text=f"{hint} (ESC: 취소)",
-                         fg="white", bg="black", font=("Arial", 14))
-        label.place(relx=0.5, rely=0.02, anchor="n")
-
     def _on_press(self, event):
-        self.start_x = event.x_root
-        self.start_y = event.y_root
+        self.start_x = event.x
+        self.start_y = event.y
         if self.rect:
             self.canvas.delete(self.rect)
 
     def _on_drag(self, event):
         if self.rect:
             self.canvas.delete(self.rect)
-        x1 = self.start_x - self.root.winfo_rootx()
-        y1 = self.start_y - self.root.winfo_rooty()
-        x2 = event.x
-        y2 = event.y
-        self.rect = self.canvas.create_rectangle(x1, y1, x2, y2,
-                                                  outline="red", width=2, fill="")
+        self.rect = self.canvas.create_rectangle(
+            self.start_x, self.start_y, event.x, event.y,
+            outline="red", width=2, fill="#ff000033"
+        )
 
     def _on_release(self, event):
-        x1 = min(self.start_x, event.x_root)
-        y1 = min(self.start_y, event.y_root)
-        x2 = max(self.start_x, event.x_root)
-        y2 = max(self.start_y, event.y_root)
+        x1 = min(self.start_x, event.x)
+        y1 = min(self.start_y, event.y)
+        x2 = max(self.start_x, event.x)
+        y2 = max(self.start_y, event.y)
         self.root.destroy()
+
         if x2 - x1 < 5 or y2 - y1 < 5:
             return
 
         if self.mode == "capture":
-            # 오버레이 닫힌 후 잠시 대기 후 캡처
-            self.root.after(150, lambda: self._do_capture(x1, y1, x2, y2))
+            self._do_capture(x1, y1, x2, y2)
         else:
             self.callback((x1, y1, x2, y2))
 
     def _do_capture(self, x1, y1, x2, y2):
-        img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        img = self._screenshot.crop((x1, y1, x2, y2))
         path = os.path.join(self.save_dir, f"capture_{int(time.time()*1000)}.png")
         img.save(path)
         self.callback(path)

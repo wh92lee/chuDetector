@@ -526,7 +526,6 @@ class RecordDialog:
         # 이미지 경로
         tk.Label(frame_left, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
         self.img_var = tk.StringVar(value=r["image_path"])
-        self.img_var.trace_add("write", lambda *_: self._update_preview())
         tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=1, column=1, **pad)
         tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
         tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
@@ -605,6 +604,7 @@ class RecordDialog:
         )
         if path:
             self.img_var.set(path)
+            self._update_preview()
 
     def _capture_image(self):
         self.win.grab_release()
@@ -615,8 +615,9 @@ class RecordDialog:
     def _on_captured(self, path):
         self.win.deiconify()
         self.win.grab_set()
+        self.win.update()
         self.img_var.set(path)
-        self.win.after(150, self._update_preview)
+        self.win.after(50, self._update_preview)
 
     def _update_preview(self):
         path = self.img_var.get().strip()
@@ -624,17 +625,17 @@ class RecordDialog:
             self.preview_label.config(image="", text="이미지 없음")
             return
         try:
-            self.win.update_idletasks()
-            pw = self.preview_label.winfo_width() or 300
-            ph = self.preview_label.winfo_height() or 250
-            if pw < 10:
-                pw, ph = 300, 250
+            pw = self.preview_label.winfo_width()
+            ph = self.preview_label.winfo_height()
+            if pw < 10 or ph < 10:
+                pw, ph = 280, 220
 
             img = Image.open(path)
             img.thumbnail((pw, ph), Image.LANCZOS)
             self._preview_img = ImageTk.PhotoImage(img)
             self.preview_label.config(image=self._preview_img, text="")
-        except Exception:
+        except Exception as e:
+            print(f"[preview error] {e}")
             self.preview_label.config(image="", text="이미지 로드 실패")
 
     def _apply(self):

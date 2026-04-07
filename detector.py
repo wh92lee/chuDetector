@@ -121,17 +121,33 @@ class CheDetect:
         self._register_hotkeys()
 
     def _build_ui(self):
+        # ── 좌우 분할 ──
+        frame_main = tk.Frame(self.root)
+        frame_main.pack(fill="both", expand=True)
+
+        frame_left = tk.Frame(frame_main)
+        frame_left.pack(side="left", fill="y", padx=(0, 0))
+
+        frame_right = tk.LabelFrame(frame_main, text="영역 미리보기", bg="#2b2b2b", width=300)
+        frame_right.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=8)
+        frame_right.pack_propagate(False)
+
+        self.region_preview = tk.Label(frame_right, text="영역 미설정", bg="#2b2b2b",
+                                        fg="#888888", font=("Arial", 10))
+        self.region_preview.pack(fill="both", expand=True, padx=4, pady=4)
+        self._region_preview_img = None
+
         # ── 감지 영역 ──
-        frame_region = tk.LabelFrame(self.root, text="감지 영역")
+        frame_region = tk.LabelFrame(frame_left, text="감지 영역")
         frame_region.pack(padx=10, pady=(10, 5), fill="x")
 
         self.region_var = tk.StringVar(value="설정 안됨")
-        tk.Label(frame_region, textvariable=self.region_var, width=30).pack(side="left", padx=5, pady=3)
+        tk.Label(frame_region, textvariable=self.region_var, width=28).pack(side="left", padx=5, pady=3)
         tk.Button(frame_region, text="영역 선택", command=self._select_region).pack(side="left", padx=5)
         tk.Button(frame_region, text="전체 화면", command=self._set_fullscreen).pack(side="left", padx=5)
 
         # ── 레코드 테이블 ──
-        frame_table = tk.LabelFrame(self.root, text="레코드")
+        frame_table = tk.LabelFrame(frame_left, text="레코드")
         frame_table.pack(padx=10, pady=5, fill="both")
 
         columns = ("#", "이름", "이미지", "YES→", "NO→", "정확도")
@@ -150,7 +166,7 @@ class CheDetect:
         self.tree.bind("<Double-1>", self._on_double_click)
 
         # ── 레코드 버튼 ──
-        frame_rec_btns = tk.Frame(self.root)
+        frame_rec_btns = tk.Frame(frame_left)
         frame_rec_btns.pack(padx=10, pady=3)
 
         tk.Button(frame_rec_btns, text="+ 추가", width=8, command=self._add_record).pack(side="left", padx=2)
@@ -160,7 +176,7 @@ class CheDetect:
         tk.Button(frame_rec_btns, text="▼ 아래로", width=8, command=self._move_down).pack(side="left", padx=2)
 
         # ── 단축키 설정 ──
-        frame_keys = tk.LabelFrame(self.root, text="단축키 설정")
+        frame_keys = tk.LabelFrame(frame_left, text="단축키 설정")
         frame_keys.pack(padx=10, pady=5, fill="x")
 
         tk.Label(frame_keys, text="시작/종료:").grid(row=0, column=0, padx=5, pady=3)
@@ -170,10 +186,10 @@ class CheDetect:
 
         # ── 상태 ──
         self.status_var = tk.StringVar(value="⏹ 대기 중")
-        tk.Label(self.root, textvariable=self.status_var, font=("Arial", 11, "bold")).pack(pady=3)
+        tk.Label(frame_left, textvariable=self.status_var, font=("Arial", 11, "bold")).pack(pady=3)
 
         # ── 저장/불러오기/시작 ──
-        frame_btns = tk.Frame(self.root)
+        frame_btns = tk.Frame(frame_left)
         frame_btns.pack(padx=10, pady=(0, 10))
 
         tk.Button(frame_btns, text="💾 저장", width=10, command=self._save).pack(side="left", padx=3)
@@ -192,11 +208,30 @@ class CheDetect:
         self.region = region
         self.region_var.set(f"({region[0]}, {region[1]}) ~ ({region[2]}, {region[3]})")
         self.root.deiconify()
+        self.root.after(100, self._update_region_preview)
 
     def _set_fullscreen(self):
         w, h = pyautogui.size()
         self.region = (0, 0, w, h)
         self.region_var.set(f"전체 화면 ({w}x{h})")
+        self.root.after(100, self._update_region_preview)
+
+    def _update_region_preview(self):
+        if not self.region:
+            return
+        try:
+            self.root.update_idletasks()
+            pw = self.region_preview.winfo_width() or 280
+            ph = self.region_preview.winfo_height() or 400
+            if pw < 10:
+                pw, ph = 280, 400
+
+            img = ImageGrab.grab(bbox=self.region)
+            img.thumbnail((pw, ph), Image.LANCZOS)
+            self._region_preview_img = ImageTk.PhotoImage(img)
+            self.region_preview.config(image=self._region_preview_img, text="")
+        except Exception as e:
+            self.region_preview.config(image="", text=f"미리보기 오류\n{e}")
 
     # ── 레코드 관리 ──
     def _refresh_table(self):

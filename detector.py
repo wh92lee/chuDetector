@@ -408,7 +408,7 @@ class RecordDialog:
         self.win = tk.Toplevel(parent)
         self.win.title("레코드 추가" if edit_idx is None else "레코드 편집")
         self.win.grab_set()
-        self.win.resizable(False, False)
+        self.win.resizable(True, True)
 
         if edit_idx is not None:
             r = records[edit_idx]
@@ -417,59 +417,65 @@ class RecordDialog:
 
         pad = {"padx": 8, "pady": 4}
 
+        # ── 좌우 분할 ──
+        frame_left = tk.Frame(self.win)
+        frame_left.pack(side="left", fill="y", padx=(0, 0))
+
+        frame_right = tk.Frame(self.win, bg="#2b2b2b", width=300)
+        frame_right.pack(side="left", fill="both", expand=True)
+        frame_right.pack_propagate(False)
+
+        # ── 왼쪽: 폼 ──
         # 이름
-        tk.Label(self.win, text="이름:").grid(row=0, column=0, sticky="e", **pad)
+        tk.Label(frame_left, text="이름:").grid(row=0, column=0, sticky="e", **pad)
         self.name_var = tk.StringVar(value=r["name"])
-        tk.Entry(self.win, textvariable=self.name_var, width=25).grid(row=0, column=1, columnspan=3, **pad)
+        tk.Entry(frame_left, textvariable=self.name_var, width=22).grid(row=0, column=1, columnspan=3, **pad)
 
         # 이미지 경로
-        tk.Label(self.win, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
+        tk.Label(frame_left, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
         self.img_var = tk.StringVar(value=r["image_path"])
         self.img_var.trace_add("write", lambda *_: self._update_preview())
-        tk.Entry(self.win, textvariable=self.img_var, width=20).grid(row=1, column=1, **pad)
-        tk.Button(self.win, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
-        tk.Button(self.win, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
-
-        # 미리보기
-        self.preview_label = tk.Label(self.win, text="미리보기 없음", bg="#e0e0e0",
-                                      width=20, height=5, relief="sunken")
-        self.preview_label.grid(row=2, column=0, columnspan=4, padx=8, pady=4, sticky="ew")
-        self._preview_img = None
-        if r["image_path"] and os.path.exists(r["image_path"]):
-            self._update_preview()
+        tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=1, column=1, **pad)
+        tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
+        tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
 
         # YES → 이동
-        tk.Label(self.win, text="YES → 레코드:").grid(row=3, column=0, sticky="e", **pad)
+        tk.Label(frame_left, text="YES → 레코드:").grid(row=2, column=0, sticky="e", **pad)
         yes_options = [str(i + 1) for i in range(self.count)] + ["종료"]
         self.yes_var = tk.StringVar()
-        if r["yes_to"] is not None and r["yes_to"] < self.count:
-            self.yes_var.set(str(r["yes_to"] + 1))
-        else:
-            self.yes_var.set("종료")
-        ttk.Combobox(self.win, textvariable=self.yes_var, values=yes_options, width=8,
-                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
+        self.yes_var.set(str(r["yes_to"] + 1) if r["yes_to"] is not None and r["yes_to"] < self.count else "종료")
+        ttk.Combobox(frame_left, textvariable=self.yes_var, values=yes_options, width=8,
+                     state="readonly").grid(row=2, column=1, sticky="w", **pad)
 
         # NO → 이동
-        tk.Label(self.win, text="NO → 레코드:").grid(row=4, column=0, sticky="e", **pad)
+        tk.Label(frame_left, text="NO → 레코드:").grid(row=3, column=0, sticky="e", **pad)
         no_options = [str(i + 1) for i in range(self.count)] + ["종료"]
         self.no_var = tk.StringVar()
-        if r["no_to"] is not None and r["no_to"] < self.count:
-            self.no_var.set(str(r["no_to"] + 1))
-        else:
-            self.no_var.set("종료")
-        ttk.Combobox(self.win, textvariable=self.no_var, values=no_options, width=8,
-                     state="readonly").grid(row=4, column=1, sticky="w", **pad)
+        self.no_var.set(str(r["no_to"] + 1) if r["no_to"] is not None and r["no_to"] < self.count else "종료")
+        ttk.Combobox(frame_left, textvariable=self.no_var, values=no_options, width=8,
+                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
 
         # 정확도
-        tk.Label(self.win, text="정확도 (%):").grid(row=5, column=0, sticky="e", **pad)
+        tk.Label(frame_left, text="정확도 (%):").grid(row=4, column=0, sticky="e", **pad)
         self.conf_var = tk.StringVar(value=str(int(r["confidence"] * 100)))
-        tk.Entry(self.win, textvariable=self.conf_var, width=8).grid(row=5, column=1, sticky="w", **pad)
+        tk.Entry(frame_left, textvariable=self.conf_var, width=8).grid(row=4, column=1, sticky="w", **pad)
 
         # 버튼
-        frame_btn = tk.Frame(self.win)
-        frame_btn.grid(row=6, column=0, columnspan=4, pady=8)
+        frame_btn = tk.Frame(frame_left)
+        frame_btn.grid(row=5, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
+
+        # ── 오른쪽: 미리보기 ──
+        tk.Label(frame_right, text="미리보기", bg="#2b2b2b", fg="white",
+                 font=("Arial", 10)).pack(pady=(6, 2))
+        self.preview_label = tk.Label(frame_right, text="이미지 없음", bg="#2b2b2b",
+                                       fg="#888888", font=("Arial", 10))
+        self.preview_label.pack(fill="both", expand=True, padx=4, pady=(0, 8))
+        self._preview_img = None
+
+        if r["image_path"] and os.path.exists(r["image_path"]):
+            self.win.after(100, self._update_preview)
 
     def _browse_image(self):
         path = filedialog.askopenfilename(
@@ -491,11 +497,17 @@ class RecordDialog:
     def _update_preview(self):
         path = self.img_var.get().strip()
         if not path or not os.path.exists(path):
-            self.preview_label.config(image="", text="미리보기 없음")
+            self.preview_label.config(image="", text="이미지 없음")
             return
         try:
+            self.win.update_idletasks()
+            pw = self.preview_label.winfo_width() or 300
+            ph = self.preview_label.winfo_height() or 250
+            if pw < 10:
+                pw, ph = 300, 250
+
             img = Image.open(path)
-            img.thumbnail((200, 100))
+            img.thumbnail((pw, ph), Image.LANCZOS)
             self._preview_img = ImageTk.PhotoImage(img)
             self.preview_label.config(image=self._preview_img, text="")
         except Exception:

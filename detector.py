@@ -83,7 +83,7 @@ class RegionSelector:
             self.canvas.delete(self.rect)
         self.rect = self.canvas.create_rectangle(
             self.start_x, self.start_y, event.x, event.y,
-            outline="red", width=2, fill="#ff000033"
+            outline="red", width=2, fill="red", stipple="gray25"
         )
 
     def _on_release(self, event):
@@ -495,6 +495,7 @@ class RecordDialog:
         self.edit_idx = edit_idx
         self.refresh_callback = refresh_callback
         self.count = len(records)
+        self._preview_img = None
 
         self.win = tk.Toplevel(parent)
         self.win.title("레코드 추가" if edit_idx is None else "레코드 편집")
@@ -592,7 +593,6 @@ class RecordDialog:
         self.preview_label = tk.Label(frame_right, text="이미지 없음", bg="#2b2b2b",
                                        fg="#888888", font=("Arial", 10))
         self.preview_label.pack(fill="both", expand=True, padx=4, pady=(0, 8))
-        self._preview_img = None
 
         if r["image_path"] and os.path.exists(r["image_path"]):
             self.win.after(100, self._update_preview)
@@ -620,6 +620,8 @@ class RecordDialog:
         self.win.after(50, self._update_preview)
 
     def _update_preview(self):
+        if not hasattr(self, "preview_label"):
+            return
         path = self.img_var.get().strip()
         if not path or not os.path.exists(path):
             self.preview_label.config(image="", text="이미지 없음")

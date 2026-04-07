@@ -119,6 +119,9 @@ class CheDetect:
         self.running = False
         self.macro_thread = None
         self.start_key = DEFAULT_START_KEY
+        self._live_preview_running = False
+        self._live_preview_thread = None
+        self._region_preview_img = None
 
         self._build_ui()
         self._register_hotkeys()
@@ -138,7 +141,6 @@ class CheDetect:
         self.region_preview = tk.Label(frame_right, text="영역 미설정", bg="#2b2b2b",
                                         fg="#888888", font=("Arial", 10))
         self.region_preview.pack(fill="both", expand=True, padx=4, pady=4)
-        self._region_preview_img = None
 
         # ── 감지 영역 ──
         frame_region = tk.LabelFrame(frame_left, text="감지 영역")
@@ -211,30 +213,45 @@ class CheDetect:
         self.region = region
         self.region_var.set(f"({region[0]}, {region[1]}) ~ ({region[2]}, {region[3]})")
         self.root.deiconify()
-        self.root.after(100, self._update_region_preview)
+        self._start_live_preview()
 
     def _set_fullscreen(self):
         w, h = pyautogui.size()
         self.region = (0, 0, w, h)
         self.region_var.set(f"전체 화면 ({w}x{h})")
-        self.root.after(100, self._update_region_preview)
+        self._start_live_preview()
 
-    def _update_region_preview(self):
-        if not self.region:
+    def _start_live_preview(self):
+        self._live_preview_running = False
+        if self._live_preview_thread and self._live_preview_thread.is_alive():
+            self._live_preview_thread.join(timeout=0.5)
+        self._live_preview_running = True
+        self._live_preview_thread = threading.Thread(
+            target=self._live_preview_loop, daemon=True)
+        self._live_preview_thread.start()
+
+    def _live_preview_loop(self):
+        while self._live_preview_running and self.region:
+            try:
+                img = ImageGrab.grab(bbox=self.region)
+                self.root.after(0, self._apply_preview_frame, img)
+            except Exception:
+                pass
+            time.sleep(0.1)  # 10fps
+
+    def _apply_preview_frame(self, img):
+        if not self._live_preview_running:
             return
         try:
-            self.root.update_idletasks()
-            pw = self.region_preview.winfo_width() or 280
+            pw = self.region_preview.winfo_width() or 580
             ph = self.region_preview.winfo_height() or 400
             if pw < 10:
-                pw, ph = 280, 400
-
-            img = ImageGrab.grab(bbox=self.region)
+                pw, ph = 580, 400
             img.thumbnail((pw, ph), Image.LANCZOS)
             self._region_preview_img = ImageTk.PhotoImage(img)
             self.region_preview.config(image=self._region_preview_img, text="")
-        except Exception as e:
-            self.region_preview.config(image="", text=f"미리보기 오류\n{e}")
+        except Exception:
+            pass
 
     # ── 레코드 관리 ──
     def _refresh_table(self):
@@ -428,6 +445,7 @@ class CheDetect:
 
     def on_close(self):
         self.running = False
+        self._live_preview_running = False
         try:
             keyboard.unhook_all()
         except:

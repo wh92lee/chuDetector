@@ -616,6 +616,7 @@ class RecordDialog:
         self.win.deiconify()
         self.win.grab_set()
         self.img_var.set(path)
+        self.win.after(150, self._update_preview)
 
     def _update_preview(self):
         path = self.img_var.get().strip()

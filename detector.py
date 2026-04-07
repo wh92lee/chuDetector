@@ -552,38 +552,9 @@ class RecordDialog:
         self.conf_var = tk.StringVar(value=str(int(r["confidence"] * 100)))
         tk.Entry(frame_left, textvariable=self.conf_var, width=8).grid(row=4, column=1, sticky="w", **pad)
 
-        # 클릭 여부
-        frame_click = tk.LabelFrame(frame_left, text="클릭")
-        frame_click.grid(row=5, column=0, columnspan=4, padx=8, pady=4, sticky="ew")
-
-        self.click_var = tk.StringVar(value="사용" if r.get("click_enabled") else "미사용")
-        click_cb = ttk.Combobox(frame_click, textvariable=self.click_var,
-                                 values=["미사용", "사용"], width=7, state="readonly")
-        click_cb.grid(row=0, column=0, padx=6, pady=4)
-
-        tk.Label(frame_click, text="X:").grid(row=0, column=1, padx=(6, 2))
-        self.click_x_var = tk.StringVar(value=str(r.get("click_x", 0)))
-        self.click_x_entry = tk.Entry(frame_click, textvariable=self.click_x_var, width=6)
-        self.click_x_entry.grid(row=0, column=2, padx=2)
-
-        tk.Label(frame_click, text="Y:").grid(row=0, column=3, padx=(6, 2))
-        self.click_y_var = tk.StringVar(value=str(r.get("click_y", 0)))
-        self.click_y_entry = tk.Entry(frame_click, textvariable=self.click_y_var, width=6)
-        self.click_y_entry.grid(row=0, column=4, padx=2)
-
-        tk.Button(frame_click, text="현재위치", command=self._pick_click_pos).grid(row=0, column=5, padx=6)
-
-        def _toggle_click_fields(*_):
-            state = "normal" if self.click_var.get() == "사용" else "disabled"
-            self.click_x_entry.config(state=state)
-            self.click_y_entry.config(state=state)
-
-        self.click_var.trace_add("write", _toggle_click_fields)
-        _toggle_click_fields()
-
         # 버튼
         frame_btn = tk.Frame(frame_left)
-        frame_btn.grid(row=6, column=0, columnspan=4, pady=8)
+        frame_btn.grid(row=5, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
 

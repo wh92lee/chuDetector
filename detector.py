@@ -40,8 +40,8 @@ class RegionSelector:
         self.start_x = self.start_y = 0
         self.rect = None
 
-        # 먼저 화면 전체 스크린샷 찍기
-        self._screenshot = ImageGrab.grab()
+        # 먼저 화면 전체 스크린샷 찍기 (pyautogui가 더 안정적)
+        self._screenshot = pyautogui.screenshot()
         sw, sh = self._screenshot.size
 
         self.root = tk.Toplevel()
@@ -609,7 +609,8 @@ class RecordDialog:
     def _capture_image(self):
         self.win.grab_release()
         self.win.withdraw()
-        self.win.after(200, lambda: RegionSelector(self._on_captured, mode="capture"))
+        self.win.update()  # withdraw 즉시 반영
+        self.win.after(400, lambda: RegionSelector(self._on_captured, mode="capture"))
 
     def _on_captured(self, path):
         self.win.deiconify()

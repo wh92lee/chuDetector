@@ -128,7 +128,7 @@ class CheDetect:
         frame_left = tk.Frame(frame_main)
         frame_left.pack(side="left", fill="y", padx=(0, 0))
 
-        frame_right = tk.LabelFrame(frame_main, text="영역 미리보기", bg="#2b2b2b", width=300)
+        frame_right = tk.LabelFrame(frame_main, text="영역 미리보기", bg="#2b2b2b", width=600)
         frame_right.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=8)
         frame_right.pack_propagate(False)
 

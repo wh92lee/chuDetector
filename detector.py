@@ -579,11 +579,15 @@ class RecordDialog:
         tk.Label(self.random_frame, text="(0.00초)").pack(side="left")
 
         # Row 3: 이미지 경로
-        tk.Label(frame_left, text="이미지:").grid(row=3, column=0, sticky="e", **pad)
+        self._img_label = tk.Label(frame_left, text="이미지:")
+        self._img_label.grid(row=3, column=0, sticky="e", **pad)
         self.img_var = tk.StringVar(value=r.get("image_path", ""))
-        tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=3, column=1, **pad)
-        tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=3, column=2, **pad)
-        tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=3, column=3, **pad)
+        self._img_entry = tk.Entry(frame_left, textvariable=self.img_var, width=16)
+        self._img_entry.grid(row=3, column=1, **pad)
+        self._img_btn_file = tk.Button(frame_left, text="파일", width=5, command=self._browse_image)
+        self._img_btn_file.grid(row=3, column=2, **pad)
+        self._img_btn_cap = tk.Button(frame_left, text="캡처", width=5, command=self._capture_image)
+        self._img_btn_cap.grid(row=3, column=3, **pad)
 
         # Row 4: YES → 이동
         tk.Label(frame_left, text="YES → 레코드:").grid(row=4, column=0, sticky="e", **pad)
@@ -636,13 +640,25 @@ class RecordDialog:
             self.yes_combo["values"] = self._yes_options_no_exit
             if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
                 self.yes_var.set(self._yes_options_no_exit[0])
+            self._img_label.grid_remove()
+            self._img_entry.grid_remove()
+            self._img_btn_file.grid_remove()
+            self._img_btn_cap.grid_remove()
         elif wtype == "random":
             self.random_frame.pack(fill="x", pady=2)
             self.yes_combo["values"] = self._yes_options_no_exit
             if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
                 self.yes_var.set(self._yes_options_no_exit[0])
+            self._img_label.grid_remove()
+            self._img_entry.grid_remove()
+            self._img_btn_file.grid_remove()
+            self._img_btn_cap.grid_remove()
         else:
             self.yes_combo["values"] = self._yes_options_all
+            self._img_label.grid()
+            self._img_entry.grid()
+            self._img_btn_file.grid()
+            self._img_btn_cap.grid()
 
     def _browse_image(self):
         path = filedialog.askopenfilename(

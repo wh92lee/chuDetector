@@ -657,12 +657,14 @@ class CheDetect:
 
     # ── 레코드 하이라이트 ──
     def _highlight_record(self, idx):
+        self.tree.selection_set([])
         children = self.tree.get_children()
         self.tree.tag_configure("active", background="#3a7bd5", foreground="white")
         for i, item in enumerate(children):
             self.tree.item(item, tags=("active",) if i == idx else ())
 
     def _clear_highlight(self):
+        self.tree.selection_set([])
         for item in self.tree.get_children():
             self.tree.item(item, tags=())
 

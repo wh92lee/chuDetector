@@ -819,6 +819,7 @@ class CheDetect:
 # ────────── 레코드 편집 다이얼로그 ──────────
 class RecordDialog:
     def __init__(self, parent, records, edit_idx, refresh_callback):
+        self.parent = parent
         self.records = records
         self.edit_idx = edit_idx
         self.refresh_callback = refresh_callback
@@ -994,15 +995,17 @@ class RecordDialog:
     def _capture_color(self):
         self.win.grab_release()
         self.win.withdraw()
+        self.parent.iconify()
         self.win.update()
         self.win.after(400, lambda: RegionSelector(self._on_color_region_selected, mode="region"))
 
     def _on_color_region_selected(self, region):
         x1, y1, x2, y2 = region
         screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        self.parent.deiconify()
         self.win.deiconify()
-        self.win.grab_set()
         self.win.update()
+        self.win.grab_set()
         ColorPickerDialog(self.win, region, screenshot,
                           lambda rgb, tol: self._on_color_picked(region, rgb, tol))
 

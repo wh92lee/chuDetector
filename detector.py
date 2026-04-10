@@ -299,7 +299,10 @@ class CheDetect:
             messagebox.showwarning("선택 없음", "편집할 레코드를 선택하세요.")
             return
         idx = self.tree.index(selected[0])
-        RecordDialog(self.root, self.records, idx, self._refresh_table)
+        if self.records[idx].get("type") == "click":
+            ClickRecordDialog(self.root, self.records, idx, self._refresh_table)
+        else:
+            RecordDialog(self.root, self.records, idx, self._refresh_table)
 
     def _delete_record(self):
         selected = self.tree.selection()
@@ -757,6 +760,81 @@ class RecordDialog:
             self.records.append(record)
         else:
             self.records[self.edit_idx] = record
+
+        self.refresh_callback()
+        self.win.destroy()
+
+
+# ────────── 클릭 레코드 편집 다이얼로그 ──────────
+class ClickRecordDialog:
+    def __init__(self, parent, records, edit_idx, refresh_callback):
+        self.records = records
+        self.edit_idx = edit_idx
+        self.refresh_callback = refresh_callback
+        self.count = len(records)
+
+        r = records[edit_idx]
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("클릭레코드 편집")
+        self.win.grab_set()
+        self.win.resizable(False, False)
+
+        pad = {"padx": 10, "pady": 5}
+
+        # 이름
+        tk.Label(self.win, text="이름:").grid(row=0, column=0, sticky="e", **pad)
+        self.name_var = tk.StringVar(value=r.get("name", "클릭"))
+        tk.Entry(self.win, textvariable=self.name_var, width=20).grid(row=0, column=1, sticky="w", **pad)
+
+        # X
+        tk.Label(self.win, text="X:").grid(row=1, column=0, sticky="e", **pad)
+        self.x_var = tk.StringVar(value=str(r.get("click_x", 0)))
+        tk.Entry(self.win, textvariable=self.x_var, width=20).grid(row=1, column=1, sticky="w", **pad)
+
+        # Y
+        tk.Label(self.win, text="Y:").grid(row=2, column=0, sticky="e", **pad)
+        self.y_var = tk.StringVar(value=str(r.get("click_y", 0)))
+        tk.Entry(self.win, textvariable=self.y_var, width=20).grid(row=2, column=1, sticky="w", **pad)
+
+        # YES → 레코드
+        tk.Label(self.win, text="YES → 레코드:").grid(row=3, column=0, sticky="e", **pad)
+        yes_options = [str(i + 1) for i in range(self.count)] + ["종료"]
+        self.yes_var = tk.StringVar()
+        self.yes_var.set(str(r["yes_to"] + 1) if r["yes_to"] is not None and r["yes_to"] < self.count else "종료")
+        ttk.Combobox(self.win, textvariable=self.yes_var, values=yes_options, width=8,
+                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
+
+        # 버튼
+        frame_btn = tk.Frame(self.win)
+        frame_btn.grid(row=4, column=0, columnspan=2, pady=10)
+        tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
+        tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
+
+    def _apply(self):
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showerror("오류", "이름을 입력하세요.", parent=self.win)
+            return
+
+        try:
+            x = int(self.x_var.get())
+            y = int(self.y_var.get())
+        except ValueError:
+            messagebox.showerror("오류", "X, Y는 정수로 입력하세요.", parent=self.win)
+            return
+
+        yes_val = self.yes_var.get()
+        yes_to = int(yes_val) - 1 if yes_val != "종료" else None
+
+        self.records[self.edit_idx] = {
+            "type": "click",
+            "name": name,
+            "click_x": x,
+            "click_y": y,
+            "yes_to": yes_to,
+            "no_to": self.records[self.edit_idx].get("no_to"),
+        }
 
         self.refresh_callback()
         self.win.destroy()

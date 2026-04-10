@@ -478,7 +478,7 @@ class CheDetect:
         for i, r in enumerate(self.records):
             rtype = r.get("type", "image")
             if rtype == "click":
-                content = f"x:{r.get('click_x',0)}  y:{r.get('click_y',0)}"
+                content = f"영역내 x:{r.get('click_x',0)}  y:{r.get('click_y',0)}"
                 conf_label = "-"
             elif rtype == "color":
                 rgb = r.get("color_rgb", [0, 0, 0])
@@ -495,18 +495,23 @@ class CheDetect:
         RecordDialog(self.root, self.records, None, self._refresh_table)
 
     def _add_click_record(self):
-        x, y = pyautogui.position()
+        if not self.region:
+            self.root.after(0, lambda: messagebox.showwarning(
+                "경고", "감지 영역을 먼저 설정하세요.\n(클릭 좌표는 영역 내 상대 좌표로 저장됩니다.)"))
+            return
+        ax, ay = pyautogui.position()
+        rx, ry = ax - self.region[0], ay - self.region[1]
         count = len(self.records)
         record = {
             "type": "click",
             "name": "클릭",
-            "click_x": x,
-            "click_y": y,
+            "click_x": rx,
+            "click_y": ry,
             "yes_to": 0 if count > 0 else None,
             "no_to": None,
         }
         self.records.append(record)
-        self._refresh_table()
+        self.root.after(0, self._refresh_table)
 
     def _edit_record(self):
         selected = self.tree.selection()
@@ -642,9 +647,12 @@ class CheDetect:
             rtype = record.get("type", "image")
 
             if rtype == "click":
-                pyautogui.click(record["click_x"], record["click_y"])
-                self.root.after(0, lambda r=record, i=current_idx:
-                                self.status_var.set(f"▶ [{i+1}] {r['name']} - 클릭 ({r['click_x']},{r['click_y']})"))
+                rx, ry = record["click_x"], record["click_y"]
+                ax = rx + (self.region[0] if self.region else 0)
+                ay = ry + (self.region[1] if self.region else 0)
+                pyautogui.click(ax, ay)
+                self.root.after(0, lambda r=record, i=current_idx, ax=ax, ay=ay:
+                                self.status_var.set(f"▶ [{i+1}] {r['name']} - 클릭 ({ax},{ay})"))
                 next_idx = record["yes_to"]
             elif rtype == "color":
                 pos = self._find_color(record)

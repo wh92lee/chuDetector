@@ -5,6 +5,7 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import time
 import json
+import random
 import os
 import sys
 import tempfile
@@ -436,6 +437,13 @@ class CheDetect:
                     self.root.after(0, lambda r=record, i=current_idx:
                                     self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
                     next_idx = record["yes_to"]
+                    wait_type = record.get("wait_type", "none")
+                    if wait_type == "single":
+                        time.sleep(record.get("wait_single", 0))
+                    elif wait_type == "random":
+                        delay = random.uniform(
+                            record.get("wait_min", 0), record.get("wait_max", 0))
+                        time.sleep(delay)
                 else:
                     self.root.after(0, lambda r=record, i=current_idx:
                                     self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
@@ -506,7 +514,8 @@ class RecordDialog:
             r = records[edit_idx]
         else:
             r = {"type": "image", "name": "", "image_path": "", "yes_to": 0,
-                 "no_to": None, "confidence": DEFAULT_CONFIDENCE}
+                 "no_to": None, "confidence": DEFAULT_CONFIDENCE,
+                 "wait_type": "none", "wait_single": 1.0, "wait_min": 0.0, "wait_max": 1.0}
 
         pad = {"padx": 8, "pady": 4}
 
@@ -519,42 +528,76 @@ class RecordDialog:
         frame_right.pack_propagate(False)
 
         # ── 왼쪽: 폼 ──
-        # 이름
+        # Row 0: 이름
         tk.Label(frame_left, text="이름:").grid(row=0, column=0, sticky="e", **pad)
         self.name_var = tk.StringVar(value=r["name"])
         tk.Entry(frame_left, textvariable=self.name_var, width=22).grid(row=0, column=1, columnspan=3, **pad)
 
-        # 이미지 경로
+        # Row 1: 이미지 경로
         tk.Label(frame_left, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
-        self.img_var = tk.StringVar(value=r["image_path"])
+        self.img_var = tk.StringVar(value=r.get("image_path", ""))
         tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=1, column=1, **pad)
         tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
         tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
 
-        # YES → 이동
-        tk.Label(frame_left, text="YES → 레코드:").grid(row=2, column=0, sticky="e", **pad)
-        yes_options = [str(i + 1) for i in range(self.count)] + ["종료"]
+        # Row 2: 대기 라디오버튼
+        tk.Label(frame_left, text="대기:").grid(row=2, column=0, sticky="e", **pad)
+        wait_radio_frame = tk.Frame(frame_left)
+        wait_radio_frame.grid(row=2, column=1, columnspan=3, sticky="w", padx=8, pady=4)
+        self.wait_type_var = tk.StringVar(value=r.get("wait_type", "none"))
+        tk.Radiobutton(wait_radio_frame, text="없음", variable=self.wait_type_var, value="none",
+                       command=self._on_wait_type_change).pack(side="left")
+        tk.Radiobutton(wait_radio_frame, text="단일", variable=self.wait_type_var, value="single",
+                       command=self._on_wait_type_change).pack(side="left", padx=(8, 0))
+        tk.Radiobutton(wait_radio_frame, text="랜덤", variable=self.wait_type_var, value="random",
+                       command=self._on_wait_type_change).pack(side="left", padx=(8, 0))
+
+        # Row 3: 대기 상세 설정 (동적 표시)
+        self.wait_detail_frame = tk.Frame(frame_left)
+        self.wait_detail_frame.grid(row=3, column=0, columnspan=4, sticky="w", padx=8)
+
+        # 단일 대기 설정 서브프레임
+        self.single_frame = tk.Frame(self.wait_detail_frame)
+        tk.Label(self.single_frame, text="대기(초) 설정 :").pack(side="left")
+        self.wait_single_var = tk.StringVar(value=str(r.get("wait_single", 1.0)))
+        tk.Entry(self.single_frame, textvariable=self.wait_single_var, width=8).pack(side="left", padx=4)
+        tk.Label(self.single_frame, text="(초)").pack(side="left")
+
+        # 랜덤 대기 설정 서브프레임
+        self.random_frame = tk.Frame(self.wait_detail_frame)
+        tk.Label(self.random_frame, text="대기(초) 설정 :").pack(side="left")
+        self.wait_min_var = tk.StringVar(value=str(r.get("wait_min", 0.0)))
+        tk.Entry(self.random_frame, textvariable=self.wait_min_var, width=7).pack(side="left", padx=4)
+        tk.Label(self.random_frame, text="(0.00초)  ~").pack(side="left")
+        self.wait_max_var = tk.StringVar(value=str(r.get("wait_max", 1.0)))
+        tk.Entry(self.random_frame, textvariable=self.wait_max_var, width=7).pack(side="left", padx=4)
+        tk.Label(self.random_frame, text="(0.00초)").pack(side="left")
+
+        # Row 4: YES → 이동
+        tk.Label(frame_left, text="YES → 레코드:").grid(row=4, column=0, sticky="e", **pad)
+        self._yes_options_all = [str(i + 1) for i in range(self.count)] + ["종료"]
+        self._yes_options_no_exit = [str(i + 1) for i in range(self.count)] or ["종료"]
         self.yes_var = tk.StringVar()
         self.yes_var.set(str(r["yes_to"] + 1) if r["yes_to"] is not None and r["yes_to"] < self.count else "종료")
-        ttk.Combobox(frame_left, textvariable=self.yes_var, values=yes_options, width=8,
-                     state="readonly").grid(row=2, column=1, sticky="w", **pad)
+        self.yes_combo = ttk.Combobox(frame_left, textvariable=self.yes_var, width=8, state="readonly")
+        self.yes_combo.grid(row=4, column=1, sticky="w", **pad)
 
-        # NO → 이동
-        tk.Label(frame_left, text="NO → 레코드:").grid(row=3, column=0, sticky="e", **pad)
+        # Row 5: NO → 이동
+        tk.Label(frame_left, text="NO → 레코드:").grid(row=5, column=0, sticky="e", **pad)
         no_options = [str(i + 1) for i in range(self.count)] + ["종료"]
         self.no_var = tk.StringVar()
         self.no_var.set(str(r["no_to"] + 1) if r["no_to"] is not None and r["no_to"] < self.count else "종료")
         ttk.Combobox(frame_left, textvariable=self.no_var, values=no_options, width=8,
-                     state="readonly").grid(row=3, column=1, sticky="w", **pad)
+                     state="readonly").grid(row=5, column=1, sticky="w", **pad)
 
-        # 정확도
-        tk.Label(frame_left, text="정확도 (%):").grid(row=4, column=0, sticky="e", **pad)
-        self.conf_var = tk.StringVar(value=str(int(r["confidence"] * 100)))
-        tk.Entry(frame_left, textvariable=self.conf_var, width=8).grid(row=4, column=1, sticky="w", **pad)
+        # Row 6: 정확도
+        tk.Label(frame_left, text="정확도 (%):").grid(row=6, column=0, sticky="e", **pad)
+        self.conf_var = tk.StringVar(value=str(int(r.get("confidence", DEFAULT_CONFIDENCE) * 100)))
+        tk.Entry(frame_left, textvariable=self.conf_var, width=8).grid(row=6, column=1, sticky="w", **pad)
 
-        # 버튼
+        # Row 7: 버튼
         frame_btn = tk.Frame(frame_left)
-        frame_btn.grid(row=5, column=0, columnspan=4, pady=8)
+        frame_btn.grid(row=7, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
 
@@ -565,8 +608,29 @@ class RecordDialog:
                                        fg="#888888", font=("Arial", 10))
         self.preview_label.pack(fill="both", expand=True, padx=4, pady=(0, 8))
 
-        if r["image_path"] and os.path.exists(r["image_path"]):
+        # 초기 대기 UI 상태 반영
+        self._on_wait_type_change()
+
+        img_path = r.get("image_path", "")
+        if img_path and os.path.exists(img_path):
             self.win.after(100, self._update_preview)
+
+    def _on_wait_type_change(self):
+        wtype = self.wait_type_var.get()
+        self.single_frame.pack_forget()
+        self.random_frame.pack_forget()
+        if wtype == "single":
+            self.single_frame.pack(fill="x", pady=2)
+            self.yes_combo["values"] = self._yes_options_no_exit
+            if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
+                self.yes_var.set(self._yes_options_no_exit[0])
+        elif wtype == "random":
+            self.random_frame.pack(fill="x", pady=2)
+            self.yes_combo["values"] = self._yes_options_no_exit
+            if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
+                self.yes_var.set(self._yes_options_no_exit[0])
+        else:
+            self.yes_combo["values"] = self._yes_options_all
 
     def _browse_image(self):
         path = filedialog.askopenfilename(
@@ -630,10 +694,37 @@ class RecordDialog:
             messagebox.showerror("오류", "정확도는 1~100 숫자로 입력하세요.", parent=self.win)
             return
 
+        wait_type = self.wait_type_var.get()
+        wait_single = 0.0
+        wait_min = 0.0
+        wait_max = 0.0
+
+        if wait_type == "single":
+            try:
+                wait_single = float(self.wait_single_var.get())
+                if wait_single < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("오류", "대기(초)는 0 이상의 숫자로 입력하세요.", parent=self.win)
+                return
+        elif wait_type == "random":
+            try:
+                wait_min = float(self.wait_min_var.get())
+                wait_max = float(self.wait_max_var.get())
+                if wait_min < 0 or wait_max < 0 or wait_min > wait_max:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("오류", "대기 범위를 올바르게 입력하세요.\n(최솟값 ≤ 최댓값, 0 이상)", parent=self.win)
+                return
+
         yes_val = self.yes_var.get()
         no_val = self.no_var.get()
         yes_to = int(yes_val) - 1 if yes_val != "종료" else None
         no_to = int(no_val) - 1 if no_val != "종료" else None
+
+        if wait_type in ("single", "random") and yes_to is None:
+            messagebox.showerror("오류", "대기 설정 시 YES → 레코드를 지정해야 합니다.", parent=self.win)
+            return
 
         record = {
             "type": "image",
@@ -641,7 +732,11 @@ class RecordDialog:
             "image_path": img_path,
             "yes_to": yes_to,
             "no_to": no_to,
-            "confidence": conf
+            "confidence": conf,
+            "wait_type": wait_type,
+            "wait_single": wait_single,
+            "wait_min": wait_min,
+            "wait_max": wait_max,
         }
 
         if self.edit_idx is None:

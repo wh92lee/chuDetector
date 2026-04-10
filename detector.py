@@ -429,25 +429,34 @@ class CheDetect:
                                 self.status_var.set(f"▶ [{i+1}] {r['name']} - 클릭 ({r['click_x']},{r['click_y']})"))
                 next_idx = record["yes_to"]
             else:
-                found = self._find_image(record)
-                if found:
-                    cx = (found[0] + found[2]) // 2
-                    cy = (found[1] + found[3]) // 2
-                    pyautogui.click(cx, cy)
+                wait_type = record.get("wait_type", "none")
+                img_path = record.get("image_path", "")
+                # 이미지 없이 대기만 하는 경우 (단일/랜덤이고 이미지 미설정)
+                if wait_type in ("single", "random") and (not img_path or not os.path.exists(img_path)):
                     self.root.after(0, lambda r=record, i=current_idx:
-                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
-                    next_idx = record["yes_to"]
-                    wait_type = record.get("wait_type", "none")
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - 대기"))
                     if wait_type == "single":
                         time.sleep(record.get("wait_single", 0))
-                    elif wait_type == "random":
-                        delay = random.uniform(
-                            record.get("wait_min", 0), record.get("wait_max", 0))
-                        time.sleep(delay)
+                    else:
+                        time.sleep(random.uniform(record.get("wait_min", 0), record.get("wait_max", 0)))
+                    next_idx = record["yes_to"]
                 else:
-                    self.root.after(0, lambda r=record, i=current_idx:
-                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
-                    next_idx = record["no_to"]
+                    found = self._find_image(record)
+                    if found:
+                        cx = (found[0] + found[2]) // 2
+                        cy = (found[1] + found[3]) // 2
+                        pyautogui.click(cx, cy)
+                        self.root.after(0, lambda r=record, i=current_idx:
+                                        self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
+                        next_idx = record["yes_to"]
+                        if wait_type == "single":
+                            time.sleep(record.get("wait_single", 0))
+                        elif wait_type == "random":
+                            time.sleep(random.uniform(record.get("wait_min", 0), record.get("wait_max", 0)))
+                    else:
+                        self.root.after(0, lambda r=record, i=current_idx:
+                                        self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
+                        next_idx = record["no_to"]
 
             if next_idx is None:
                 self._stop_from_thread()
@@ -533,17 +542,10 @@ class RecordDialog:
         self.name_var = tk.StringVar(value=r["name"])
         tk.Entry(frame_left, textvariable=self.name_var, width=22).grid(row=0, column=1, columnspan=3, **pad)
 
-        # Row 1: 이미지 경로
-        tk.Label(frame_left, text="이미지:").grid(row=1, column=0, sticky="e", **pad)
-        self.img_var = tk.StringVar(value=r.get("image_path", ""))
-        tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=1, column=1, **pad)
-        tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=1, column=2, **pad)
-        tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=1, column=3, **pad)
-
-        # Row 2: 대기 라디오버튼
-        tk.Label(frame_left, text="대기:").grid(row=2, column=0, sticky="e", **pad)
+        # Row 1: 대기 라디오버튼
+        tk.Label(frame_left, text="대기:").grid(row=1, column=0, sticky="e", **pad)
         wait_radio_frame = tk.Frame(frame_left)
-        wait_radio_frame.grid(row=2, column=1, columnspan=3, sticky="w", padx=8, pady=4)
+        wait_radio_frame.grid(row=1, column=1, columnspan=3, sticky="w", padx=8, pady=4)
         self.wait_type_var = tk.StringVar(value=r.get("wait_type", "none"))
         tk.Radiobutton(wait_radio_frame, text="없음", variable=self.wait_type_var, value="none",
                        command=self._on_wait_type_change).pack(side="left")
@@ -552,9 +554,9 @@ class RecordDialog:
         tk.Radiobutton(wait_radio_frame, text="랜덤", variable=self.wait_type_var, value="random",
                        command=self._on_wait_type_change).pack(side="left", padx=(8, 0))
 
-        # Row 3: 대기 상세 설정 (동적 표시)
+        # Row 2: 대기 상세 설정 (동적 표시)
         self.wait_detail_frame = tk.Frame(frame_left)
-        self.wait_detail_frame.grid(row=3, column=0, columnspan=4, sticky="w", padx=8)
+        self.wait_detail_frame.grid(row=2, column=0, columnspan=4, sticky="w", padx=8)
 
         # 단일 대기 설정 서브프레임
         self.single_frame = tk.Frame(self.wait_detail_frame)
@@ -572,6 +574,13 @@ class RecordDialog:
         self.wait_max_var = tk.StringVar(value=str(r.get("wait_max", 1.0)))
         tk.Entry(self.random_frame, textvariable=self.wait_max_var, width=7).pack(side="left", padx=4)
         tk.Label(self.random_frame, text="(0.00초)").pack(side="left")
+
+        # Row 3: 이미지 경로
+        tk.Label(frame_left, text="이미지:").grid(row=3, column=0, sticky="e", **pad)
+        self.img_var = tk.StringVar(value=r.get("image_path", ""))
+        tk.Entry(frame_left, textvariable=self.img_var, width=16).grid(row=3, column=1, **pad)
+        tk.Button(frame_left, text="파일", width=5, command=self._browse_image).grid(row=3, column=2, **pad)
+        tk.Button(frame_left, text="캡처", width=5, command=self._capture_image).grid(row=3, column=3, **pad)
 
         # Row 4: YES → 이동
         tk.Label(frame_left, text="YES → 레코드:").grid(row=4, column=0, sticky="e", **pad)
@@ -682,8 +691,13 @@ class RecordDialog:
             return
 
         img_path = self.img_var.get().strip()
-        if not img_path or not os.path.exists(img_path):
-            messagebox.showerror("오류", "유효한 이미지 파일을 선택하세요.", parent=self.win)
+        wait_type_check = self.wait_type_var.get()
+        if wait_type_check == "none":
+            if not img_path or not os.path.exists(img_path):
+                messagebox.showerror("오류", "유효한 이미지 파일을 선택하세요.", parent=self.win)
+                return
+        elif img_path and not os.path.exists(img_path):
+            messagebox.showerror("오류", "이미지 경로가 올바르지 않습니다.", parent=self.win)
             return
 
         try:

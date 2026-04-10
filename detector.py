@@ -269,6 +269,10 @@ class CheDetect:
             if rtype == "click":
                 content = f"x:{r.get('click_x',0)}  y:{r.get('click_y',0)}"
                 conf_label = "-"
+            elif rtype == "color":
+                rgb = r.get("color_rgb", [0, 0, 0])
+                content = f"색상 RGB({rgb[0]},{rgb[1]},{rgb[2]})"
+                conf_label = f"±{r.get('color_tolerance', 20)}"
             else:
                 content = os.path.basename(r.get("image_path", "")) or "없음"
                 conf_label = f"{int(r.get('confidence', DEFAULT_CONFIDENCE) * 100)}%"
@@ -431,6 +435,22 @@ class CheDetect:
                 self.root.after(0, lambda r=record, i=current_idx:
                                 self.status_var.set(f"▶ [{i+1}] {r['name']} - 클릭 ({r['click_x']},{r['click_y']})"))
                 next_idx = record["yes_to"]
+            elif rtype == "color":
+                pos = self._find_color(record)
+                wait_type = record.get("wait_type", "none")
+                if pos:
+                    pyautogui.click(pos[0], pos[1])
+                    self.root.after(0, lambda r=record, i=current_idx:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - 색상 YES 클릭"))
+                    next_idx = record["yes_to"]
+                    if wait_type == "single":
+                        time.sleep(record.get("wait_single", 0))
+                    elif wait_type == "random":
+                        time.sleep(random.uniform(record.get("wait_min", 0), record.get("wait_max", 0)))
+                else:
+                    self.root.after(0, lambda r=record, i=current_idx:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - 색상 NO"))
+                    next_idx = record["no_to"]
             else:
                 wait_type = record.get("wait_type", "none")
                 img_path = record.get("image_path", "")
@@ -491,6 +511,32 @@ class CheDetect:
                 return (x1 + mx, y1 + my, x1 + mx + tw, y1 + my + th)
         except Exception as e:
             print(f"이미지 감지 오류: {e}")
+        return None
+
+    def _find_color(self, record):
+        """색상을 color_region에서 찾아 클릭 좌표 반환, 없으면 None"""
+        region = record.get("color_region")
+        if not region:
+            return None
+        try:
+            x1, y1, x2, y2 = region
+            screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+            img = np.array(screenshot)
+            r, g, b = record["color_rgb"]
+            tol = record.get("color_tolerance", 20)
+            mask = (
+                (np.abs(img[:, :, 0].astype(int) - r) <= tol) &
+                (np.abs(img[:, :, 1].astype(int) - g) <= tol) &
+                (np.abs(img[:, :, 2].astype(int) - b) <= tol)
+            )
+            positions = np.argwhere(mask)
+            if len(positions) > 0:
+                cy_arr, cx_arr = positions[:, 0], positions[:, 1]
+                cx_mean = int(cx_arr.mean()) + x1
+                cy_mean = int(cy_arr.mean()) + y1
+                return (cx_mean, cy_mean)
+        except Exception as e:
+            print(f"색상 감지 오류: {e}")
         return None
 
     def _stop_from_thread(self):
@@ -578,16 +624,36 @@ class RecordDialog:
         tk.Entry(self.random_frame, textvariable=self.wait_max_var, width=7).pack(side="left", padx=4)
         tk.Label(self.random_frame, text="(0.00초)").pack(side="left")
 
-        # Row 3: 이미지 경로
-        self._img_label = tk.Label(frame_left, text="이미지:")
-        self._img_label.grid(row=3, column=0, sticky="e", **pad)
+        # Row 3: 이미지/색상 감지 컨테이너
+        self._detect_frame = tk.Frame(frame_left)
+        self._detect_frame.grid(row=3, column=0, columnspan=4, sticky="w")
+
+        # 이미지 모드 서브프레임
+        self._img_row = tk.Frame(self._detect_frame)
+        tk.Label(self._img_row, text="이미지:", width=9, anchor="e").pack(side="left", padx=(8, 2))
         self.img_var = tk.StringVar(value=r.get("image_path", ""))
-        self._img_entry = tk.Entry(frame_left, textvariable=self.img_var, width=16)
-        self._img_entry.grid(row=3, column=1, **pad)
-        self._img_btn_file = tk.Button(frame_left, text="파일", width=5, command=self._browse_image)
-        self._img_btn_file.grid(row=3, column=2, **pad)
-        self._img_btn_cap = tk.Button(frame_left, text="캡처", width=5, command=self._capture_image)
-        self._img_btn_cap.grid(row=3, column=3, **pad)
+        tk.Entry(self._img_row, textvariable=self.img_var, width=16).pack(side="left")
+        tk.Button(self._img_row, text="파일", width=5, command=self._browse_image).pack(side="left", padx=4)
+        tk.Button(self._img_row, text="캡처", width=5, command=self._capture_color).pack(side="left")
+
+        # 색상 모드 서브프레임
+        self._color_row = tk.Frame(self._detect_frame)
+        tk.Label(self._color_row, text="색상:", width=9, anchor="e").pack(side="left", padx=(8, 2))
+        self._color_swatch = tk.Label(self._color_row, text="   ", bg="#cccccc", relief="sunken", width=3)
+        self._color_swatch.pack(side="left")
+        self._color_info_label = tk.Label(self._color_row, text="")
+        self._color_info_label.pack(side="left", padx=6)
+        tk.Button(self._color_row, text="재선택", width=6, command=self._capture_color).pack(side="left", padx=4)
+        tk.Button(self._color_row, text="초기화", width=5, command=self._clear_color).pack(side="left")
+
+        # 색상 데이터 초기화
+        self.color_data = None
+        if r.get("type") == "color":
+            self.color_data = {
+                "region": r.get("color_region"),
+                "rgb": r.get("color_rgb"),
+                "tolerance": r.get("color_tolerance", 20),
+            }
 
         # Row 4: YES → 이동
         tk.Label(frame_left, text="YES → 레코드:").grid(row=4, column=0, sticky="e", **pad)
@@ -624,8 +690,9 @@ class RecordDialog:
                                        fg="#888888", font=("Arial", 10))
         self.preview_label.pack(fill="both", expand=True, padx=4, pady=(0, 8))
 
-        # 초기 대기 UI 상태 반영
+        # 초기 대기 UI 상태 및 이미지/색상 모드 반영
         self._on_wait_type_change()
+        self._update_detect_mode()
 
         img_path = r.get("image_path", "")
         if img_path and os.path.exists(img_path):
@@ -640,25 +707,16 @@ class RecordDialog:
             self.yes_combo["values"] = self._yes_options_no_exit
             if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
                 self.yes_var.set(self._yes_options_no_exit[0])
-            self._img_label.grid_remove()
-            self._img_entry.grid_remove()
-            self._img_btn_file.grid_remove()
-            self._img_btn_cap.grid_remove()
+            self._detect_frame.grid_remove()
         elif wtype == "random":
             self.random_frame.pack(fill="x", pady=2)
             self.yes_combo["values"] = self._yes_options_no_exit
             if self.yes_var.get() == "종료" and self._yes_options_no_exit[0] != "종료":
                 self.yes_var.set(self._yes_options_no_exit[0])
-            self._img_label.grid_remove()
-            self._img_entry.grid_remove()
-            self._img_btn_file.grid_remove()
-            self._img_btn_cap.grid_remove()
+            self._detect_frame.grid_remove()
         else:
             self.yes_combo["values"] = self._yes_options_all
-            self._img_label.grid()
-            self._img_entry.grid()
-            self._img_btn_file.grid()
-            self._img_btn_cap.grid()
+            self._detect_frame.grid()
 
     def _browse_image(self):
         path = filedialog.askopenfilename(
@@ -666,21 +724,47 @@ class RecordDialog:
             title="이미지 선택"
         )
         if path:
+            self.color_data = None          # 색상 모드 해제
             self.img_var.set(path)
+            self._update_detect_mode()
             self._update_preview()
 
-    def _capture_image(self):
+    def _capture_color(self):
         self.win.grab_release()
         self.win.withdraw()
-        self.win.update()  # withdraw 즉시 반영
-        self.win.after(400, lambda: RegionSelector(self._on_captured, mode="capture"))
+        self.win.update()
+        self.win.after(400, lambda: RegionSelector(self._on_color_region_selected, mode="region"))
 
-    def _on_captured(self, path):
+    def _on_color_region_selected(self, region):
+        screenshot = pyautogui.screenshot(region=region)
         self.win.deiconify()
         self.win.grab_set()
         self.win.update()
-        self.img_var.set(path)
-        self.win.after(50, self._update_preview)
+        ColorPickerDialog(self.win, region, screenshot,
+                          lambda rgb, tol: self._on_color_picked(region, rgb, tol))
+
+    def _on_color_picked(self, region, rgb, tolerance):
+        self.color_data = {"region": list(region), "rgb": list(rgb), "tolerance": tolerance}
+        self.img_var.set("")
+        self._update_detect_mode()
+        self.preview_label.config(image="", text="이미지 없음")
+
+    def _clear_color(self):
+        self.color_data = None
+        self._update_detect_mode()
+
+    def _update_detect_mode(self):
+        if self.color_data and self.color_data.get("rgb"):
+            r, g, b = self.color_data["rgb"]
+            hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            self._color_swatch.config(bg=hex_color)
+            tol = self.color_data.get("tolerance", 20)
+            self._color_info_label.config(text=f"RGB({r},{g},{b})  허용±{tol}")
+            self._img_row.pack_forget()
+            self._color_row.pack(fill="x", pady=2)
+        else:
+            self._color_row.pack_forget()
+            self._img_row.pack(fill="x", pady=2)
 
     def _update_preview(self):
         if not hasattr(self, "preview_label"):
@@ -707,24 +791,6 @@ class RecordDialog:
         name = self.name_var.get().strip()
         if not name:
             messagebox.showerror("오류", "이름을 입력하세요.", parent=self.win)
-            return
-
-        img_path = self.img_var.get().strip()
-        wait_type_check = self.wait_type_var.get()
-        if wait_type_check == "none":
-            if not img_path or not os.path.exists(img_path):
-                messagebox.showerror("오류", "유효한 이미지 파일을 선택하세요.", parent=self.win)
-                return
-        elif img_path and not os.path.exists(img_path):
-            messagebox.showerror("오류", "이미지 경로가 올바르지 않습니다.", parent=self.win)
-            return
-
-        try:
-            conf = int(self.conf_var.get()) / 100
-            if not (0 < conf <= 1):
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("오류", "정확도는 1~100 숫자로 입력하세요.", parent=self.win)
             return
 
         wait_type = self.wait_type_var.get()
@@ -759,18 +825,50 @@ class RecordDialog:
             messagebox.showerror("오류", "대기 설정 시 YES → 레코드를 지정해야 합니다.", parent=self.win)
             return
 
-        record = {
-            "type": "image",
+        common = {
             "name": name,
-            "image_path": img_path,
             "yes_to": yes_to,
             "no_to": no_to,
-            "confidence": conf,
             "wait_type": wait_type,
             "wait_single": wait_single,
             "wait_min": wait_min,
             "wait_max": wait_max,
         }
+
+        if self.color_data and self.color_data.get("rgb"):
+            # 색상 감지 레코드
+            record = {
+                "type": "color",
+                "color_region": self.color_data["region"],
+                "color_rgb": self.color_data["rgb"],
+                "color_tolerance": self.color_data.get("tolerance", 20),
+                **common,
+            }
+        else:
+            # 이미지 템플릿 매칭 레코드
+            img_path = self.img_var.get().strip()
+            if wait_type == "none":
+                if not img_path or not os.path.exists(img_path):
+                    messagebox.showerror("오류", "유효한 이미지 파일을 선택하거나 색상을 캡처하세요.", parent=self.win)
+                    return
+            elif img_path and not os.path.exists(img_path):
+                messagebox.showerror("오류", "이미지 경로가 올바르지 않습니다.", parent=self.win)
+                return
+
+            try:
+                conf = int(self.conf_var.get()) / 100
+                if not (0 < conf <= 1):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("오류", "정확도는 1~100 숫자로 입력하세요.", parent=self.win)
+                return
+
+            record = {
+                "type": "image",
+                "image_path": img_path,
+                "confidence": conf,
+                **common,
+            }
 
         if self.edit_idx is None:
             self.records.append(record)
@@ -778,6 +876,89 @@ class RecordDialog:
             self.records[self.edit_idx] = record
 
         self.refresh_callback()
+        self.win.destroy()
+
+
+# ────────── 색상 선택 다이얼로그 ──────────
+class ColorPickerDialog:
+    def __init__(self, parent, region_coords, screenshot, callback):
+        self.region_coords = region_coords
+        self.screenshot = screenshot
+        self.callback = callback
+        self._selected_rgb = None
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("색상 선택")
+        self.win.grab_set()
+        self.win.resizable(False, False)
+
+        # 표시용 이미지 스케일 (최대 400x300)
+        display = screenshot.copy()
+        display.thumbnail((400, 300), Image.LANCZOS)
+        self._scale_x = screenshot.width / display.width
+        self._scale_y = screenshot.height / display.height
+        self._display = display
+        self._tk_img = ImageTk.PhotoImage(display)
+
+        tk.Label(self.win, text="색상을 선택할 픽셀을 클릭하세요",
+                 font=("Arial", 10)).pack(pady=(8, 4))
+
+        self.canvas = tk.Canvas(self.win, width=display.width, height=display.height,
+                                cursor="crosshair")
+        self.canvas.pack(padx=8)
+        self.canvas.create_image(0, 0, anchor="nw", image=self._tk_img)
+        self.canvas.bind("<Motion>", self._on_motion)
+        self.canvas.bind("<Button-1>", self._on_click)
+
+        # 색상 미리보기
+        info_frame = tk.Frame(self.win)
+        info_frame.pack(fill="x", padx=8, pady=4)
+        tk.Label(info_frame, text="선택 색상:").pack(side="left")
+        self._swatch = tk.Label(info_frame, text="   ", bg="#cccccc", relief="sunken", width=4)
+        self._swatch.pack(side="left", padx=4)
+        self._rgb_label = tk.Label(info_frame, text="클릭하여 선택")
+        self._rgb_label.pack(side="left")
+
+        # 허용 오차
+        tol_frame = tk.Frame(self.win)
+        tol_frame.pack(fill="x", padx=8, pady=4)
+        tk.Label(tol_frame, text="허용 오차 (0~255):").pack(side="left")
+        self._tol_var = tk.StringVar(value="20")
+        tk.Entry(tol_frame, textvariable=self._tol_var, width=6).pack(side="left", padx=4)
+
+        # 버튼
+        btn_frame = tk.Frame(self.win)
+        btn_frame.pack(pady=8)
+        self._ok_btn = tk.Button(btn_frame, text="확인", width=10, command=self._apply,
+                                  state="disabled")
+        self._ok_btn.pack(side="left", padx=5)
+        tk.Button(btn_frame, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
+
+    def _pixel_at(self, event):
+        px = max(0, min(int(event.x * self._scale_x), self.screenshot.width - 1))
+        py = max(0, min(int(event.y * self._scale_y), self.screenshot.height - 1))
+        return self.screenshot.getpixel((px, py))[:3]
+
+    def _on_motion(self, event):
+        r, g, b = self._pixel_at(event)
+        self._swatch.config(bg=f"#{r:02x}{g:02x}{b:02x}")
+        self._rgb_label.config(text=f"RGB({r}, {g}, {b})")
+
+    def _on_click(self, event):
+        r, g, b = self._pixel_at(event)
+        self._selected_rgb = (r, g, b)
+        self._swatch.config(bg=f"#{r:02x}{g:02x}{b:02x}")
+        self._rgb_label.config(text=f"RGB({r}, {g}, {b})  ✓ 선택됨")
+        self._ok_btn.config(state="normal")
+
+    def _apply(self):
+        if self._selected_rgb is None:
+            return
+        try:
+            tol = max(0, min(255, int(self._tol_var.get())))
+        except ValueError:
+            tol = 20
+        self.callback(self._selected_rgb, tol)
         self.win.destroy()
 
 

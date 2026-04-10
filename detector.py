@@ -920,6 +920,16 @@ class ColorPickerDialog:
         self._rgb_label = tk.Label(info_frame, text="클릭하여 선택")
         self._rgb_label.pack(side="left")
 
+        # HEX 직접 입력
+        hex_frame = tk.Frame(self.win)
+        hex_frame.pack(fill="x", padx=8, pady=(0, 4))
+        tk.Label(hex_frame, text="HEX 직접 입력:").pack(side="left")
+        self._hex_var = tk.StringVar()
+        self._hex_entry = tk.Entry(hex_frame, textvariable=self._hex_var, width=10)
+        self._hex_entry.pack(side="left", padx=4)
+        tk.Label(hex_frame, text="(예: #FF0000)").pack(side="left")
+        tk.Button(hex_frame, text="적용", width=5, command=self._apply_hex).pack(side="left", padx=4)
+
         # 허용 오차
         tol_frame = tk.Frame(self.win)
         tol_frame.pack(fill="x", padx=8, pady=4)
@@ -940,6 +950,14 @@ class ColorPickerDialog:
         py = max(0, min(int(event.y * self._scale_y), self.screenshot.height - 1))
         return self.screenshot.getpixel((px, py))[:3]
 
+    def _set_color(self, r, g, b):
+        self._selected_rgb = (r, g, b)
+        hex_str = f"#{r:02x}{g:02x}{b:02x}"
+        self._swatch.config(bg=hex_str)
+        self._rgb_label.config(text=f"RGB({r}, {g}, {b})  ✓ 선택됨")
+        self._hex_var.set(hex_str.upper())
+        self._ok_btn.config(state="normal")
+
     def _on_motion(self, event):
         r, g, b = self._pixel_at(event)
         self._swatch.config(bg=f"#{r:02x}{g:02x}{b:02x}")
@@ -947,10 +965,22 @@ class ColorPickerDialog:
 
     def _on_click(self, event):
         r, g, b = self._pixel_at(event)
-        self._selected_rgb = (r, g, b)
-        self._swatch.config(bg=f"#{r:02x}{g:02x}{b:02x}")
-        self._rgb_label.config(text=f"RGB({r}, {g}, {b})  ✓ 선택됨")
-        self._ok_btn.config(state="normal")
+        self._set_color(r, g, b)
+
+    def _apply_hex(self):
+        raw = self._hex_var.get().strip()
+        if not raw.startswith("#"):
+            raw = "#" + raw
+        try:
+            raw = raw.lstrip("#")
+            if len(raw) != 6:
+                raise ValueError
+            r = int(raw[0:2], 16)
+            g = int(raw[2:4], 16)
+            b = int(raw[4:6], 16)
+            self._set_color(r, g, b)
+        except ValueError:
+            messagebox.showerror("오류", "올바른 HEX 코드를 입력하세요.\n예: #FF0000", parent=self.win)
 
     def _apply(self):
         if self._selected_rgb is None:

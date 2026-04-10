@@ -653,6 +653,18 @@ class CheDetect:
         self.running = False
         self.status_var.set("⏹ 대기 중")
         self.toggle_btn.config(text="▶ 시작", bg="#4CAF50")
+        self._clear_highlight()
+
+    # ── 레코드 하이라이트 ──
+    def _highlight_record(self, idx):
+        children = self.tree.get_children()
+        self.tree.tag_configure("active", background="#3a7bd5", foreground="white")
+        for i, item in enumerate(children):
+            self.tree.item(item, tags=("active",) if i == idx else ())
+
+    def _clear_highlight(self):
+        for item in self.tree.get_children():
+            self.tree.item(item, tags=())
 
     # ── 매크로 실행 ──
     def _run_macro(self):
@@ -666,6 +678,7 @@ class CheDetect:
 
             record = self.records[current_idx]
             rtype = record.get("type", "image")
+            self.root.after(0, lambda i=current_idx: self._highlight_record(i))
 
             if rtype == "loop":
                 cnt = loop_counters.get(current_idx, 0) + 1
@@ -805,6 +818,7 @@ class CheDetect:
         self.running = False
         self.root.after(0, lambda: self.status_var.set("⏹ 완료"))
         self.root.after(0, lambda: self.toggle_btn.config(text="▶ 시작", bg="#4CAF50"))
+        self.root.after(0, self._clear_highlight)
 
     def on_close(self):
         self.running = False

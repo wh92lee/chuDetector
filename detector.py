@@ -389,6 +389,7 @@ class CheDetect:
         frame_rec_btns.pack(padx=10, pady=3)
 
         tk.Button(frame_rec_btns, text="+ 추가", width=8, command=self._add_record).pack(side="left", padx=2)
+        tk.Button(frame_rec_btns, text="🔁 반복", width=8, command=self._add_loop_record).pack(side="left", padx=2)
         tk.Button(frame_rec_btns, text="✎ 편집", width=8, command=self._edit_record).pack(side="left", padx=2)
         tk.Button(frame_rec_btns, text="삭제", width=8, command=self._delete_record).pack(side="left", padx=2)
         tk.Button(frame_rec_btns, text="▲ 위로", width=8, command=self._move_up).pack(side="left", padx=2)
@@ -477,22 +478,34 @@ class CheDetect:
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.records):
             rtype = r.get("type", "image")
-            if rtype == "click":
+            if rtype == "loop":
+                content = f"반복 {r.get('loop_count', 1)}회"
+                conf_label = "-"
+                yes_label = str(r["loop_start_to"] + 1) if r.get("loop_start_to") is not None else "-"
+                no_label  = str(r["loop_exit_to"]  + 1) if r.get("loop_exit_to")  is not None else "종료"
+            elif rtype == "click":
                 content = f"영역내 x:{r.get('click_x',0)}  y:{r.get('click_y',0)}"
                 conf_label = "-"
+                yes_label = str(r["yes_to"] + 1) if r["yes_to"] is not None else "종료"
+                no_label  = str(r["no_to"]  + 1) if r["no_to"]  is not None else "종료"
             elif rtype == "color":
                 rgb = r.get("color_rgb", [0, 0, 0])
                 content = f"색상 RGB({rgb[0]},{rgb[1]},{rgb[2]})"
                 conf_label = f"±{r.get('color_tolerance', 20)}"
+                yes_label = str(r["yes_to"] + 1) if r["yes_to"] is not None else "종료"
+                no_label  = str(r["no_to"]  + 1) if r["no_to"]  is not None else "종료"
             else:
                 content = os.path.basename(r.get("image_path", "")) or "없음"
                 conf_label = f"{int(r.get('confidence', DEFAULT_CONFIDENCE) * 100)}%"
-            yes_label = str(r["yes_to"] + 1) if r["yes_to"] is not None else "종료"
-            no_label = str(r["no_to"] + 1) if r["no_to"] is not None else "종료"
+                yes_label = str(r["yes_to"] + 1) if r["yes_to"] is not None else "종료"
+                no_label  = str(r["no_to"]  + 1) if r["no_to"]  is not None else "종료"
             self.tree.insert("", "end", values=(i + 1, r["name"], content, yes_label, no_label, conf_label))
 
     def _add_record(self):
         RecordDialog(self.root, self.records, None, self._refresh_table)
+
+    def _add_loop_record(self):
+        LoopRecordDialog(self.root, self.records, None, self._refresh_table)
 
     def _add_click_record(self):
         if not self.region:
@@ -519,8 +532,11 @@ class CheDetect:
             messagebox.showwarning("선택 없음", "편집할 레코드를 선택하세요.")
             return
         idx = self.tree.index(selected[0])
-        if self.records[idx].get("type") == "click":
+        rtype = self.records[idx].get("type")
+        if rtype == "click":
             ClickRecordDialog(self.root, self.records, idx, self._refresh_table)
+        elif rtype == "loop":
+            LoopRecordDialog(self.root, self.records, idx, self._refresh_table)
         else:
             RecordDialog(self.root, self.records, idx, self._refresh_table)
 
@@ -638,6 +654,7 @@ class CheDetect:
     # ── 매크로 실행 ──
     def _run_macro(self):
         current_idx = 0
+        loop_counters = {}   # {record_idx: 현재 반복 횟수}
         while self.running:
             if current_idx >= len(self.records) or current_idx < 0:
                 self._stop_from_thread()
@@ -646,7 +663,20 @@ class CheDetect:
             record = self.records[current_idx]
             rtype = record.get("type", "image")
 
-            if rtype == "click":
+            if rtype == "loop":
+                cnt = loop_counters.get(current_idx, 0) + 1
+                loop_counters[current_idx] = cnt
+                total = record.get("loop_count", 1)
+                if cnt >= total:
+                    loop_counters[current_idx] = 0
+                    next_idx = record.get("loop_exit_to")
+                    self.root.after(0, lambda r=record, i=current_idx, t=total:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - 반복 완료 ({t}회)"))
+                else:
+                    next_idx = record.get("loop_start_to")
+                    self.root.after(0, lambda r=record, i=current_idx, c=cnt, t=total:
+                                    self.status_var.set(f"▶ [{i+1}] {r['name']} - 반복 중 ({c}/{t})"))
+            elif rtype == "click":
                 rx, ry = record["click_x"], record["click_y"]
                 ax = rx + (self.region[0] if self.region else 0)
                 ay = ry + (self.region[1] if self.region else 0)
@@ -1209,6 +1239,103 @@ class ColorPickerDialog:
         except ValueError:
             tol = 20
         self.callback(self._selected_rgb, tol)
+        self.win.destroy()
+
+
+# ────────── 반복 구간 레코드 다이얼로그 ──────────
+class LoopRecordDialog:
+    def __init__(self, parent, records, edit_idx, refresh_callback):
+        self.records = records
+        self.edit_idx = edit_idx
+        self.refresh_callback = refresh_callback
+        self.count = len(records)
+
+        r = records[edit_idx] if edit_idx is not None else {}
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("반복 구간 추가" if edit_idx is None else "반복 구간 편집")
+        self.win.grab_set()
+        self.win.resizable(False, False)
+
+        pad = {"padx": 10, "pady": 6}
+        options = [str(i + 1) for i in range(self.count)]
+        options_exit = options + ["종료"]
+
+        # 이름
+        tk.Label(self.win, text="이름:").grid(row=0, column=0, sticky="e", **pad)
+        self.name_var = tk.StringVar(value=r.get("name", "반복"))
+        tk.Entry(self.win, textvariable=self.name_var, width=20).grid(row=0, column=1, columnspan=2, sticky="w", **pad)
+
+        # 반복 횟수
+        tk.Label(self.win, text="반복 횟수:").grid(row=1, column=0, sticky="e", **pad)
+        self.count_var = tk.StringVar(value=str(r.get("loop_count", 2)))
+        tk.Entry(self.win, textvariable=self.count_var, width=6).grid(row=1, column=1, sticky="w", **pad)
+        tk.Label(self.win, text="회").grid(row=1, column=2, sticky="w")
+
+        # 반복 시작 레코드 (루프 진입 시 이동할 레코드)
+        tk.Label(self.win, text="반복 시작 레코드:").grid(row=2, column=0, sticky="e", **pad)
+        self.start_var = tk.StringVar()
+        sv = r.get("loop_start_to")
+        self.start_var.set(str(sv + 1) if sv is not None and sv < self.count else (options[0] if options else "종료"))
+        ttk.Combobox(self.win, textvariable=self.start_var, values=options,
+                     width=8, state="readonly").grid(row=2, column=1, sticky="w", **pad)
+
+        # 완료 후 이동 레코드
+        tk.Label(self.win, text="완료 후 이동:").grid(row=3, column=0, sticky="e", **pad)
+        self.exit_var = tk.StringVar()
+        ev = r.get("loop_exit_to")
+        self.exit_var.set(str(ev + 1) if ev is not None and ev < self.count else "종료")
+        ttk.Combobox(self.win, textvariable=self.exit_var, values=options_exit,
+                     width=8, state="readonly").grid(row=3, column=1, sticky="w", **pad)
+
+        # 안내 문구
+        guide = tk.Label(self.win,
+                         text="※ 루프 마지막 레코드의 YES→를 이 반복 레코드로 연결하세요.",
+                         fg="#888888", font=("Arial", 8))
+        guide.grid(row=4, column=0, columnspan=3, pady=(0, 4))
+
+        # 버튼
+        frame_btn = tk.Frame(self.win)
+        frame_btn.grid(row=5, column=0, columnspan=3, pady=8)
+        tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
+        tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
+
+    def _apply(self):
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showerror("오류", "이름을 입력하세요.", parent=self.win)
+            return
+        try:
+            loop_count = int(self.count_var.get())
+            if loop_count < 1:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("오류", "반복 횟수는 1 이상의 정수로 입력하세요.", parent=self.win)
+            return
+
+        sv = self.start_var.get()
+        ev = self.exit_var.get()
+        loop_start_to = int(sv) - 1 if sv != "종료" and sv else None
+        loop_exit_to  = int(ev) - 1 if ev != "종료" else None
+
+        if loop_start_to is None:
+            messagebox.showerror("오류", "반복 시작 레코드를 지정하세요.", parent=self.win)
+            return
+
+        record = {
+            "type": "loop",
+            "name": name,
+            "loop_count": loop_count,
+            "loop_start_to": loop_start_to,
+            "loop_exit_to": loop_exit_to,
+        }
+
+        if self.edit_idx is None:
+            self.records.append(record)
+        else:
+            self.records[self.edit_idx] = record
+
+        self.refresh_callback()
         self.win.destroy()
 
 

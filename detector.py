@@ -736,7 +736,8 @@ class RecordDialog:
         self.win.after(400, lambda: RegionSelector(self._on_color_region_selected, mode="region"))
 
     def _on_color_region_selected(self, region):
-        screenshot = pyautogui.screenshot(region=region)
+        x1, y1, x2, y2 = region
+        screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
         self.win.deiconify()
         self.win.grab_set()
         self.win.update()

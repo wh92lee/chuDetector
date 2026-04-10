@@ -109,6 +109,217 @@ class RegionSelector:
         self.callback(path)
 
 
+# ────────── 박스 영역 선택 오버레이 ──────────
+class BoxRegionSelector:
+    """고정 비율 박스를 이동/리사이즈하여 감지 영역을 설정하는 오버레이.
+    - 박스 내부 드래그 : 이동
+    - 테두리/모서리 핸들 드래그 : 비율 고정 리사이즈
+    - 마우스 스크롤 : 비율 고정 크기 조절
+    - Enter / 더블클릭 : 확정  /  ESC : 취소
+    """
+    RATIO_W = 1476
+    RATIO_H = 777
+    HANDLE_R = 7    # 핸들 히트 반경(px)
+    MIN_W    = 200
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.ratio = self.RATIO_W / self.RATIO_H
+
+        self._screenshot = pyautogui.screenshot()
+        sw, sh = self._screenshot.size
+        self._sw, self._sh = sw, sh
+
+        # 초기 박스 크기 (화면에 맞게 축소)
+        bw = min(self.RATIO_W, sw - 80)
+        bh = round(bw / self.ratio)
+        if bh > sh - 80:
+            bh = sh - 80
+            bw = round(bh * self.ratio)
+        bx = (sw - bw) // 2
+        by = (sh - bh) // 2
+        self.box = [bx, by, bx + bw, by + bh]
+
+        self._drag_mode      = None
+        self._drag_start_xy  = None
+        self._drag_start_box = None
+
+        self.root = tk.Toplevel()
+        self.root.overrideredirect(True)
+        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.attributes("-topmost", True)
+        self.root.lift()
+        self.root.focus_force()
+
+        self.canvas = tk.Canvas(self.root, highlightthickness=0, width=sw, height=sh)
+        self.canvas.pack(fill="both", expand=True)
+
+        # 어두운 배경 (정적)
+        bg = self._screenshot.convert("RGBA").point(lambda p: int(p * 0.45))
+        self._bg_img = ImageTk.PhotoImage(bg)
+        self.canvas.create_image(0, 0, anchor="nw", image=self._bg_img)
+
+        self.canvas.bind("<ButtonPress-1>",   self._on_press)
+        self.canvas.bind("<B1-Motion>",       self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Double-Button-1>", self._on_confirm)
+        self.canvas.bind("<Motion>",          self._on_hover)
+        self.canvas.bind("<MouseWheel>",      self._on_scroll)   # Windows
+        self.canvas.bind("<Button-4>",        self._on_scroll)   # Linux scroll up
+        self.canvas.bind("<Button-5>",        self._on_scroll)   # Linux scroll down
+        self.root.bind("<Return>", self._on_confirm)
+        self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.canvas.focus_set()
+        self.root.grab_set()
+
+        self._draw()
+
+    # ── 핸들 좌표 ──
+    def _handles(self):
+        x1, y1, x2, y2 = [int(v) for v in self.box]
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        return {
+            "TL": (x1, y1), "TC": (cx, y1), "TR": (x2, y1),
+            "ML": (x1, cy),                  "MR": (x2, cy),
+            "BL": (x1, y2), "BC": (cx, y2), "BR": (x2, y2),
+        }
+
+    def _hit(self, x, y):
+        for name, (hx, hy) in self._handles().items():
+            if abs(x - hx) <= self.HANDLE_R + 2 and abs(y - hy) <= self.HANDLE_R + 2:
+                return name
+        x1, y1, x2, y2 = self.box
+        if x1 < x < x2 and y1 < y < y2:
+            return "move"
+        return None
+
+    def _cursor_for(self, hit):
+        return {
+            "TL": "size_nw_se", "BR": "size_nw_se",
+            "TR": "size_ne_sw", "BL": "size_ne_sw",
+            "TC": "size_ns",    "BC": "size_ns",
+            "ML": "size_we",    "MR": "size_we",
+            "move": "fleur",
+        }.get(hit, "arrow")
+
+    # ── 이벤트 ──
+    def _on_hover(self, event):
+        hit = self._hit(event.x, event.y)
+        self.canvas.config(cursor=self._cursor_for(hit) if hit else "arrow")
+
+    def _on_press(self, event):
+        hit = self._hit(event.x, event.y)
+        if hit:
+            self._drag_mode      = hit
+            self._drag_start_xy  = (event.x, event.y)
+            self._drag_start_box = list(self.box)
+
+    def _on_drag(self, event):
+        if not self._drag_mode:
+            return
+        dx = event.x - self._drag_start_xy[0]
+        dy = event.y - self._drag_start_xy[1]
+        x1, y1, x2, y2 = self._drag_start_box
+
+        if self._drag_mode == "move":
+            w, h = x2 - x1, y2 - y1
+            nx = max(0, min(self._sw - w, x1 + dx))
+            ny = max(0, min(self._sh - h, y1 + dy))
+            self.box = [nx, ny, nx + w, ny + h]
+        else:
+            self._resize(self._drag_mode, dx, dy, x1, y1, x2, y2)
+        self._draw()
+
+    def _resize(self, handle, dx, dy, x1, y1, x2, y2):
+        MIN_H = round(self.MIN_W / self.ratio)
+        w0, h0 = x2 - x1, y2 - y1
+
+        # 새 크기 결정
+        if handle in ("BR", "MR", "TR"):
+            nw = max(self.MIN_W, w0 + dx)
+        elif handle in ("BL", "ML", "TL"):
+            nw = max(self.MIN_W, w0 - dx)
+        elif handle == "BC":
+            nh = max(MIN_H, h0 + dy); nw = round(nh * self.ratio)
+        elif handle == "TC":
+            nh = max(MIN_H, h0 - dy); nw = round(nh * self.ratio)
+        else:
+            nw = w0
+        nh = round(nw / self.ratio)
+
+        # 앵커 적용
+        if   handle == "TL": self.box = [x2-nw, y2-nh, x2,       y2      ]
+        elif handle == "TR": self.box = [x1,    y2-nh, x1+nw,    y2      ]
+        elif handle == "BL": self.box = [x2-nw, y1,    x2,       y1+nh   ]
+        elif handle == "BR": self.box = [x1,    y1,    x1+nw,    y1+nh   ]
+        elif handle == "ML":
+            cy = (y1+y2)//2; self.box = [x2-nw, cy-nh//2, x2,    cy+nh//2]
+        elif handle == "MR":
+            cy = (y1+y2)//2; self.box = [x1,    cy-nh//2, x1+nw, cy+nh//2]
+        elif handle == "TC":
+            cx = (x1+x2)//2; self.box = [cx-nw//2, y2-nh, cx+nw//2, y2  ]
+        elif handle == "BC":
+            cx = (x1+x2)//2; self.box = [cx-nw//2, y1,    cx+nw//2, y1+nh]
+
+    def _on_scroll(self, event):
+        delta = getattr(event, "delta", 0)
+        if delta == 0:
+            delta = 120 if event.num == 4 else -120
+        factor = 1.05 if delta > 0 else 0.95
+        x1, y1, x2, y2 = self.box
+        cx, cy = (x1+x2)/2, (y1+y2)/2
+        nw = max(self.MIN_W, (x2-x1) * factor)
+        nh = round(nw / self.ratio)
+        self.box = [cx-nw/2, cy-nh/2, cx+nw/2, cy+nh/2]
+        self._draw()
+
+    def _on_release(self, event):
+        self._drag_mode = None
+
+    def _on_confirm(self, event=None):
+        region = tuple(int(v) for v in self.box)
+        self.root.destroy()
+        self.callback(region)
+
+    # ── 그리기 ──
+    def _draw(self):
+        self.canvas.delete("dyn")
+        x1, y1, x2, y2 = [int(v) for v in self.box]
+
+        # 박스 안: 원본 이미지 표시
+        crop = self._screenshot.crop((
+            max(0, x1), max(0, y1),
+            min(self._sw, x2), min(self._sh, y2)
+        ))
+        self._crop_tk = ImageTk.PhotoImage(crop)
+        self.canvas.create_image(x1, y1, anchor="nw", image=self._crop_tk, tags="dyn")
+
+        # 박스 테두리
+        self.canvas.create_rectangle(x1, y1, x2, y2,
+                                      outline="#00FF88", width=2, tags="dyn")
+
+        # 핸들 (8방향)
+        r = self.HANDLE_R
+        for hx, hy in self._handles().values():
+            self.canvas.create_rectangle(hx-r, hy-r, hx+r, hy+r,
+                                          fill="#00FF88", outline="white",
+                                          width=1, tags="dyn")
+
+        # 크기 표시
+        w, h = x2-x1, y2-y1
+        self.canvas.create_text((x1+x2)//2, y1+18,
+                                 text=f"{w} × {h}",
+                                 fill="white", font=("Arial", 11, "bold"),
+                                 tags="dyn")
+
+        # 하단 안내
+        self.canvas.create_text(
+            self._sw//2, self._sh - 22,
+            text="박스 내부 드래그: 이동  │  핸들 드래그 / 스크롤: 크기 조절  │  Enter / 더블클릭: 확인  │  ESC: 취소",
+            fill="white", font=("Arial", 11), tags="dyn"
+        )
+
+
 # ────────── 메인 앱 ──────────
 class CheDetect:
     def __init__(self, root):
@@ -215,7 +426,7 @@ class CheDetect:
     def _select_region(self):
         self.root.iconify()
         time.sleep(0.3)
-        RegionSelector(self._on_region_selected)
+        BoxRegionSelector(self._on_region_selected)
 
     def _on_region_selected(self, region):
         self.region = region

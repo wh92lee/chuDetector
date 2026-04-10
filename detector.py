@@ -479,7 +479,10 @@ class CheDetect:
         for i, r in enumerate(self.records):
             rtype = r.get("type", "image")
             if rtype == "loop":
-                content = f"반복 {r.get('loop_count', 1)}회"
+                if r.get("loop_type") == "random":
+                    content = f"반복 {r.get('loop_count_min',1)}~{r.get('loop_count_max',1)}회 (랜덤)"
+                else:
+                    content = f"반복 {r.get('loop_count', 1)}회"
                 conf_label = "-"
                 yes_label = str(r["loop_start_to"] + 1) if r.get("loop_start_to") is not None else "-"
                 no_label  = str(r["loop_exit_to"]  + 1) if r.get("loop_exit_to")  is not None else "종료"
@@ -655,6 +658,7 @@ class CheDetect:
     def _run_macro(self):
         current_idx = 0
         loop_counters = {}   # {record_idx: 현재 반복 횟수}
+        loop_targets  = {}   # {record_idx: 이번 루프의 목표 횟수 (랜덤 결정 후 고정)}
         while self.running:
             if current_idx >= len(self.records) or current_idx < 0:
                 self._stop_from_thread()
@@ -666,9 +670,18 @@ class CheDetect:
             if rtype == "loop":
                 cnt = loop_counters.get(current_idx, 0) + 1
                 loop_counters[current_idx] = cnt
-                total = record.get("loop_count", 1)
+                # 첫 진입 시 목표 횟수 결정 (랜덤이면 이때 뽑아서 루프 끝날 때까지 고정)
+                if cnt == 1:
+                    if record.get("loop_type") == "random":
+                        lo = record.get("loop_count_min", 1)
+                        hi = record.get("loop_count_max", lo)
+                        loop_targets[current_idx] = random.randint(lo, hi)
+                    else:
+                        loop_targets[current_idx] = record.get("loop_count", 1)
+                total = loop_targets[current_idx]
                 if cnt >= total:
                     loop_counters[current_idx] = 0
+                    loop_targets.pop(current_idx, None)
                     next_idx = record.get("loop_exit_to")
                     self.root.after(0, lambda r=record, i=current_idx, t=total:
                                     self.status_var.set(f"▶ [{i+1}] {r['name']} - 반복 완료 ({t}회)"))
@@ -1264,58 +1277,106 @@ class LoopRecordDialog:
         # 이름
         tk.Label(self.win, text="이름:").grid(row=0, column=0, sticky="e", **pad)
         self.name_var = tk.StringVar(value=r.get("name", "반복"))
-        tk.Entry(self.win, textvariable=self.name_var, width=20).grid(row=0, column=1, columnspan=2, sticky="w", **pad)
+        tk.Entry(self.win, textvariable=self.name_var, width=22).grid(row=0, column=1, columnspan=3, sticky="w", **pad)
 
-        # 반복 횟수
+        # 반복 횟수 타입 (고정 / 랜덤)
         tk.Label(self.win, text="반복 횟수:").grid(row=1, column=0, sticky="e", **pad)
-        self.count_var = tk.StringVar(value=str(r.get("loop_count", 2)))
-        tk.Entry(self.win, textvariable=self.count_var, width=6).grid(row=1, column=1, sticky="w", **pad)
-        tk.Label(self.win, text="회").grid(row=1, column=2, sticky="w")
+        self.loop_type_var = tk.StringVar(value=r.get("loop_type", "fixed"))
+        type_frame = tk.Frame(self.win)
+        type_frame.grid(row=1, column=1, columnspan=3, sticky="w", padx=10)
+        tk.Radiobutton(type_frame, text="고정", variable=self.loop_type_var, value="fixed",
+                       command=self._on_type_change).pack(side="left")
+        tk.Radiobutton(type_frame, text="랜덤", variable=self.loop_type_var, value="random",
+                       command=self._on_type_change).pack(side="left", padx=(12, 0))
 
-        # 반복 시작 레코드 (루프 진입 시 이동할 레코드)
-        tk.Label(self.win, text="반복 시작 레코드:").grid(row=2, column=0, sticky="e", **pad)
+        # 고정 횟수 입력
+        self._fixed_frame = tk.Frame(self.win)
+        self._fixed_frame.grid(row=2, column=0, columnspan=4, sticky="w", padx=10)
+        tk.Label(self._fixed_frame, text="횟수:").pack(side="left", padx=(50, 4))
+        self.count_var = tk.StringVar(value=str(r.get("loop_count", 2)))
+        tk.Entry(self._fixed_frame, textvariable=self.count_var, width=6).pack(side="left")
+        tk.Label(self._fixed_frame, text="회").pack(side="left", padx=(2, 0))
+
+        # 랜덤 범위 입력
+        self._random_frame = tk.Frame(self.win)
+        self._random_frame.grid(row=2, column=0, columnspan=4, sticky="w", padx=10)
+        tk.Label(self._random_frame, text="횟수:").pack(side="left", padx=(50, 4))
+        self.count_min_var = tk.StringVar(value=str(r.get("loop_count_min", 2)))
+        tk.Entry(self._random_frame, textvariable=self.count_min_var, width=5).pack(side="left")
+        tk.Label(self._random_frame, text="회  ~").pack(side="left", padx=4)
+        self.count_max_var = tk.StringVar(value=str(r.get("loop_count_max", 5)))
+        tk.Entry(self._random_frame, textvariable=self.count_max_var, width=5).pack(side="left")
+        tk.Label(self._random_frame, text="회").pack(side="left", padx=(2, 0))
+
+        # 반복 시작 레코드
+        tk.Label(self.win, text="반복 시작 레코드:").grid(row=3, column=0, sticky="e", **pad)
         self.start_var = tk.StringVar()
         sv = r.get("loop_start_to")
         self.start_var.set(str(sv + 1) if sv is not None and sv < self.count else (options[0] if options else "종료"))
         ttk.Combobox(self.win, textvariable=self.start_var, values=options,
-                     width=8, state="readonly").grid(row=2, column=1, sticky="w", **pad)
+                     width=8, state="readonly").grid(row=3, column=1, sticky="w", **pad)
 
-        # 완료 후 이동 레코드
-        tk.Label(self.win, text="완료 후 이동:").grid(row=3, column=0, sticky="e", **pad)
+        # 완료 후 이동
+        tk.Label(self.win, text="완료 후 이동:").grid(row=4, column=0, sticky="e", **pad)
         self.exit_var = tk.StringVar()
         ev = r.get("loop_exit_to")
         self.exit_var.set(str(ev + 1) if ev is not None and ev < self.count else "종료")
         ttk.Combobox(self.win, textvariable=self.exit_var, values=options_exit,
-                     width=8, state="readonly").grid(row=3, column=1, sticky="w", **pad)
+                     width=8, state="readonly").grid(row=4, column=1, sticky="w", **pad)
 
         # 안내 문구
-        guide = tk.Label(self.win,
-                         text="※ 루프 마지막 레코드의 YES→를 이 반복 레코드로 연결하세요.",
-                         fg="#888888", font=("Arial", 8))
-        guide.grid(row=4, column=0, columnspan=3, pady=(0, 4))
+        tk.Label(self.win, text="※ 루프 마지막 레코드의 YES→를 이 반복 레코드로 연결하세요.",
+                 fg="#888888", font=("Arial", 8)).grid(row=5, column=0, columnspan=4, pady=(0, 4))
 
         # 버튼
         frame_btn = tk.Frame(self.win)
-        frame_btn.grid(row=5, column=0, columnspan=3, pady=8)
+        frame_btn.grid(row=6, column=0, columnspan=4, pady=8)
         tk.Button(frame_btn, text="확인", width=10, command=self._apply).pack(side="left", padx=5)
         tk.Button(frame_btn, text="취소", width=10, command=self.win.destroy).pack(side="left", padx=5)
+
+        # 초기 상태 적용
+        self._on_type_change()
+
+    def _on_type_change(self):
+        if self.loop_type_var.get() == "fixed":
+            self._random_frame.grid_remove()
+            self._fixed_frame.grid()
+        else:
+            self._fixed_frame.grid_remove()
+            self._random_frame.grid()
 
     def _apply(self):
         name = self.name_var.get().strip()
         if not name:
             messagebox.showerror("오류", "이름을 입력하세요.", parent=self.win)
             return
-        try:
-            loop_count = int(self.count_var.get())
-            if loop_count < 1:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("오류", "반복 횟수는 1 이상의 정수로 입력하세요.", parent=self.win)
-            return
+
+        loop_type = self.loop_type_var.get()
+        loop_count = 1
+        loop_count_min = 1
+        loop_count_max = 1
+
+        if loop_type == "fixed":
+            try:
+                loop_count = int(self.count_var.get())
+                if loop_count < 1:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("오류", "반복 횟수는 1 이상의 정수로 입력하세요.", parent=self.win)
+                return
+        else:
+            try:
+                loop_count_min = int(self.count_min_var.get())
+                loop_count_max = int(self.count_max_var.get())
+                if loop_count_min < 1 or loop_count_max < loop_count_min:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("오류", "랜덤 범위를 올바르게 입력하세요.\n(최솟값 ≥ 1, 최솟값 ≤ 최댓값)", parent=self.win)
+                return
 
         sv = self.start_var.get()
         ev = self.exit_var.get()
-        loop_start_to = int(sv) - 1 if sv != "종료" and sv else None
+        loop_start_to = int(sv) - 1 if sv and sv != "종료" else None
         loop_exit_to  = int(ev) - 1 if ev != "종료" else None
 
         if loop_start_to is None:
@@ -1325,7 +1386,10 @@ class LoopRecordDialog:
         record = {
             "type": "loop",
             "name": name,
+            "loop_type": loop_type,
             "loop_count": loop_count,
+            "loop_count_min": loop_count_min,
+            "loop_count_max": loop_count_max,
             "loop_start_to": loop_start_to,
             "loop_exit_to": loop_exit_to,
         }

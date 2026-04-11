@@ -111,6 +111,18 @@ class RegionSelector:
         self.callback(path)
 
 
+# ────────── 다이얼로그 위치 헬퍼 ──────────
+def _center_on_parent(win, parent):
+    """팝업창을 부모창 중앙에 배치"""
+    win.update_idletasks()
+    pw, ph = parent.winfo_width(), parent.winfo_height()
+    px, py = parent.winfo_rootx(), parent.winfo_rooty()
+    ww, wh = win.winfo_width(), win.winfo_height()
+    x = px + (pw - ww) // 2
+    y = py + (ph - wh) // 2
+    win.geometry(f"+{x}+{y}")
+
+
 # ────────── 스크린 캡처 헬퍼 ──────────
 def _grab_region(x1, y1, x2, y2):
     """지정 영역 스크린샷 (듀얼 모니터 포함). mss 우선 사용."""
@@ -891,6 +903,7 @@ class RecordDialog:
         self.win.title("레코드 추가" if edit_idx is None else "레코드 편집")
         self.win.grab_set()
         self.win.resizable(True, True)
+        _center_on_parent(self.win, parent)
 
         if edit_idx is not None:
             r = records[edit_idx]
@@ -1218,6 +1231,7 @@ class ColorPickerDialog:
         self.win.title("색상 선택")
         self.win.grab_set()
         self.win.resizable(False, False)
+        _center_on_parent(self.win, parent)
 
         # 표시용 이미지 스케일 (최대 400x300)
         display = screenshot.copy()
@@ -1333,6 +1347,7 @@ class LoopRecordDialog:
         self.win.title("반복 구간 추가" if edit_idx is None else "반복 구간 편집")
         self.win.grab_set()
         self.win.resizable(False, False)
+        _center_on_parent(self.win, parent)
 
         pad = {"padx": 10, "pady": 6}
         options = [str(i + 1) for i in range(self.count)]
@@ -1481,6 +1496,7 @@ class ClickRecordDialog:
         self.win.title("클릭레코드 편집")
         self.win.grab_set()
         self.win.resizable(False, False)
+        _center_on_parent(self.win, parent)
 
         pad = {"padx": 10, "pady": 5}
 

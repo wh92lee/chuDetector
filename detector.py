@@ -41,13 +41,13 @@ class RegionSelector:
         self.start_x = self.start_y = 0
         self.rect = None
 
-        # 먼저 화면 전체 스크린샷 찍기 (pyautogui가 더 안정적)
-        self._screenshot = pyautogui.screenshot()
+        # 전체 가상 스크린 (듀얼 모니터 포함)
+        self._screenshot, self._vx, self._vy = _grab_virtual_screen()
         sw, sh = self._screenshot.size
 
         self.root = tk.Toplevel()
         self.root.overrideredirect(True)
-        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.geometry(f"{sw}x{sh}+{self._vx}+{self._vy}")
         self.root.attributes("-topmost", True)
         self.root.lift()
         self.root.focus_force()
@@ -100,7 +100,9 @@ class RegionSelector:
         if self.mode == "capture":
             self._do_capture(x1, y1, x2, y2)
         else:
-            self.callback((x1, y1, x2, y2))
+            # 이미지 좌표 → 실제 스크린 좌표 변환
+            self.callback((x1 + self._vx, y1 + self._vy,
+                           x2 + self._vx, y2 + self._vy))
 
     def _do_capture(self, x1, y1, x2, y2):
         img = self._screenshot.crop((x1, y1, x2, y2))
@@ -135,18 +137,9 @@ def _grab_virtual_screen():
             return img, m["left"], m["top"]
     except Exception:
         pass
-    # fallback: Windows ctypes / Linux ImageGrab
-    if sys.platform == "win32":
-        import ctypes
-        vx = ctypes.windll.user32.GetSystemMetrics(76)
-        vy = ctypes.windll.user32.GetSystemMetrics(77)
-        vw = ctypes.windll.user32.GetSystemMetrics(78)
-        vh = ctypes.windll.user32.GetSystemMetrics(79)
-        img = ImageGrab.grab(bbox=(vx, vy, vx + vw, vy + vh))
-        return img, vx, vy
-    else:
-        img = ImageGrab.grab()
-        return img, 0, 0
+    # fallback: pyautogui (단일 모니터)
+    img = pyautogui.screenshot()
+    return img, 0, 0
 
 
 # ────────── 박스 영역 선택 오버레이 ──────────
@@ -479,9 +472,18 @@ class CheDetect:
         self._start_live_preview()
 
     def _set_fullscreen(self):
-        w, h = pyautogui.size()
-        self.region = (0, 0, w, h)
-        self.region_var.set(f"전체 화면 ({w}x{h})")
+        try:
+            import mss
+            with mss.mss() as sct:
+                m = sct.monitors[0]  # 모든 모니터를 합친 가상 스크린
+                self.region = (m["left"], m["top"],
+                               m["left"] + m["width"], m["top"] + m["height"])
+        except Exception:
+            w, h = pyautogui.size()
+            self.region = (0, 0, w, h)
+        vw = self.region[2] - self.region[0]
+        vh = self.region[3] - self.region[1]
+        self.region_var.set(f"전체 화면 ({vw}x{vh})")
         self._start_live_preview()
 
     def _start_live_preview(self):

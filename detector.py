@@ -109,6 +109,22 @@ class RegionSelector:
         self.callback(path)
 
 
+# ────────── 가상 스크린 전체 범위 조회 ──────────
+def _get_virtual_bounds():
+    """모든 모니터를 포함하는 가상 스크린의 (x, y, w, h) 반환."""
+    if sys.platform == "win32":
+        import ctypes
+        vx = ctypes.windll.user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+        vy = ctypes.windll.user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+        vw = ctypes.windll.user32.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
+        vh = ctypes.windll.user32.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
+        return vx, vy, vw, vh
+    else:
+        # Linux/X11: X 디스플레이 전체가 (0,0) 기준으로 모든 모니터 포함
+        img = ImageGrab.grab()
+        return 0, 0, img.width, img.height
+
+
 # ────────── 박스 영역 선택 오버레이 ──────────
 class BoxRegionSelector:
     """고정 비율 박스를 이동/리사이즈하여 감지 영역을 설정하는 오버레이.
@@ -126,7 +142,14 @@ class BoxRegionSelector:
         self.callback = callback
         self.ratio = self.RATIO_W / self.RATIO_H
 
-        self._screenshot = pyautogui.screenshot()
+        # 전체 가상 스크린 (듀얼 모니터 포함)
+        self._vx, self._vy, vw, vh = _get_virtual_bounds()
+        if sys.platform == "win32":
+            self._screenshot = ImageGrab.grab(
+                bbox=(self._vx, self._vy, self._vx + vw, self._vy + vh)
+            )
+        else:
+            self._screenshot = ImageGrab.grab()
         sw, sh = self._screenshot.size
         self._sw, self._sh = sw, sh
 
@@ -146,7 +169,7 @@ class BoxRegionSelector:
 
         self.root = tk.Toplevel()
         self.root.overrideredirect(True)
-        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.geometry(f"{sw}x{sh}+{self._vx}+{self._vy}")
         self.root.attributes("-topmost", True)
         self.root.lift()
         self.root.focus_force()
@@ -277,7 +300,9 @@ class BoxRegionSelector:
         self._drag_mode = None
 
     def _on_confirm(self, event=None):
-        region = tuple(int(v) for v in self.box)
+        x1, y1, x2, y2 = [int(v) for v in self.box]
+        # 이미지 좌표 → 실제 스크린 좌표로 변환 (가상 스크린 오프셋 적용)
+        region = (x1 + self._vx, y1 + self._vy, x2 + self._vx, y2 + self._vy)
         self.root.destroy()
         self.callback(region)
 

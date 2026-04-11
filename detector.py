@@ -109,6 +109,19 @@ class RegionSelector:
         self.callback(path)
 
 
+# ────────── 스크린 캡처 헬퍼 ──────────
+def _grab_region(x1, y1, x2, y2):
+    """지정 영역 스크린샷 (듀얼 모니터 포함). mss 우선 사용."""
+    try:
+        import mss
+        with mss.mss() as sct:
+            monitor = {"left": x1, "top": y1, "width": x2 - x1, "height": y2 - y1}
+            sct_img = sct.grab(monitor)
+            return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+    except Exception:
+        return ImageGrab.grab(bbox=(x1, y1, x2, y2))
+
+
 # ────────── 가상 스크린 전체 스크린샷 ──────────
 def _grab_virtual_screen():
     """모든 모니터를 포함하는 스크린샷과 (vx, vy) 오프셋을 반환.
@@ -483,7 +496,7 @@ class CheDetect:
     def _live_preview_loop(self):
         while self._live_preview_running and self.region:
             try:
-                img = ImageGrab.grab(bbox=self.region)
+                img = _grab_region(*self.region)
                 self.root.after(0, self._apply_preview_frame, img)
             except Exception:
                 pass
@@ -801,7 +814,7 @@ class CheDetect:
             return None
         try:
             x1, y1, x2, y2 = self.region
-            screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+            screenshot = _grab_region(x1, y1, x2, y2)
             screen = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
             template = cv2.imread(record["image_path"])
@@ -827,7 +840,7 @@ class CheDetect:
             return None
         try:
             x1, y1, x2, y2 = region
-            screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+            screenshot = _grab_region(x1, y1, x2, y2)
             img = np.array(screenshot)
             r, g, b = record["color_rgb"]
             tol = record.get("color_tolerance", 20)
@@ -1047,7 +1060,7 @@ class RecordDialog:
 
     def _on_color_region_selected(self, region):
         x1, y1, x2, y2 = region
-        screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        screenshot = _grab_region(x1, y1, x2, y2)
         self.parent.deiconify()
         self.win.deiconify()
         self.win.update()

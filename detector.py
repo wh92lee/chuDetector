@@ -109,20 +109,31 @@ class RegionSelector:
         self.callback(path)
 
 
-# ────────── 가상 스크린 전체 범위 조회 ──────────
-def _get_virtual_bounds():
-    """모든 모니터를 포함하는 가상 스크린의 (x, y, w, h) 반환."""
+# ────────── 가상 스크린 전체 스크린샷 ──────────
+def _grab_virtual_screen():
+    """모든 모니터를 포함하는 스크린샷과 (vx, vy) 오프셋을 반환.
+    mss 사용 시 듀얼 모니터에서도 정확하게 캡처됨."""
+    try:
+        import mss
+        with mss.mss() as sct:
+            m = sct.monitors[0]   # monitors[0] = 모든 모니터를 합친 가상 스크린
+            sct_img = sct.grab(m)
+            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            return img, m["left"], m["top"]
+    except Exception:
+        pass
+    # fallback: Windows ctypes / Linux ImageGrab
     if sys.platform == "win32":
         import ctypes
-        vx = ctypes.windll.user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
-        vy = ctypes.windll.user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
-        vw = ctypes.windll.user32.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
-        vh = ctypes.windll.user32.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
-        return vx, vy, vw, vh
+        vx = ctypes.windll.user32.GetSystemMetrics(76)
+        vy = ctypes.windll.user32.GetSystemMetrics(77)
+        vw = ctypes.windll.user32.GetSystemMetrics(78)
+        vh = ctypes.windll.user32.GetSystemMetrics(79)
+        img = ImageGrab.grab(bbox=(vx, vy, vx + vw, vy + vh))
+        return img, vx, vy
     else:
-        # Linux/X11: X 디스플레이 전체가 (0,0) 기준으로 모든 모니터 포함
         img = ImageGrab.grab()
-        return 0, 0, img.width, img.height
+        return img, 0, 0
 
 
 # ────────── 박스 영역 선택 오버레이 ──────────
@@ -143,13 +154,7 @@ class BoxRegionSelector:
         self.ratio = self.RATIO_W / self.RATIO_H
 
         # 전체 가상 스크린 (듀얼 모니터 포함)
-        self._vx, self._vy, vw, vh = _get_virtual_bounds()
-        if sys.platform == "win32":
-            self._screenshot = ImageGrab.grab(
-                bbox=(self._vx, self._vy, self._vx + vw, self._vy + vh)
-            )
-        else:
-            self._screenshot = ImageGrab.grab()
+        self._screenshot, self._vx, self._vy = _grab_virtual_screen()
         sw, sh = self._screenshot.size
         self._sw, self._sh = sw, sh
 

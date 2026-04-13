@@ -123,6 +123,26 @@ def _center_on_parent(win, parent):
     win.geometry(f"+{x}+{y}")
 
 
+# ────────── DPI 보정 헬퍼 ──────────
+_DPI_SCALE_CACHE = None
+
+def _get_dpi_scale():
+    """mss(물리 픽셀) vs pyautogui(논리 픽셀) 비율 반환. DPI 클릭 보정에 사용.
+    100% DPI 환경에서는 1.0을 반환하므로 부작용 없음."""
+    global _DPI_SCALE_CACHE
+    if _DPI_SCALE_CACHE is not None:
+        return _DPI_SCALE_CACHE
+    try:
+        import mss as _mss
+        with _mss.mss() as sct:
+            phys_w = sct.monitors[1]["width"]   # 주 모니터 물리 해상도
+        logical_w, _ = pyautogui.size()         # pyautogui 논리 해상도
+        _DPI_SCALE_CACHE = logical_w / phys_w if phys_w > 0 else 1.0
+    except Exception:
+        _DPI_SCALE_CACHE = 1.0
+    return _DPI_SCALE_CACHE
+
+
 # ────────── 스크린 캡처 헬퍼 ──────────
 def _grab_region(x1, y1, x2, y2):
     """지정 영역 스크린샷 (듀얼 모니터 포함). mss 우선 사용."""
@@ -372,7 +392,7 @@ class BoxRegionSelector:
 class CheDetect:
     def __init__(self, root):
         self.root = root
-        self.root.title(f"cheDetect v{VERSION}")
+        self.root.title(f"chuDetect v{VERSION}")
         self.root.resizable(False, False)
 
         self.records = []   # {"type": "image"|"click", ...}
@@ -773,7 +793,8 @@ class CheDetect:
                 pos = self._find_color(record)
                 wait_type = record.get("wait_type", "none")
                 if pos:
-                    pyautogui.click(pos[0], pos[1])
+                    scale = _get_dpi_scale()
+                    pyautogui.click(int(pos[0] * scale), int(pos[1] * scale))
                     self.root.after(0, lambda r=record, i=current_idx:
                                     self.status_var.set(f"▶ [{i+1}] {r['name']} - 색상 YES 클릭"))
                     next_idx = record["yes_to"]
@@ -802,7 +823,8 @@ class CheDetect:
                     if found:
                         cx = (found[0] + found[2]) // 2
                         cy = (found[1] + found[3]) // 2
-                        pyautogui.click(cx, cy)
+                        scale = _get_dpi_scale()
+                        pyautogui.click(int(cx * scale), int(cy * scale))
                         self.root.after(0, lambda r=record, i=current_idx:
                                         self.status_var.set(f"▶ [{i+1}] {r['name']} - YES 클릭"))
                         next_idx = record["yes_to"]

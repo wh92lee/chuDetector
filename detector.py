@@ -21,6 +21,19 @@ try:
 except ImportError as e:
     print(f"필수 라이브러리 없음: {e}")
 
+# ────────── 경로 헬퍼 ──────────
+def _app_dir():
+    """실행 파일(또는 스크립트)이 위치한 폴더 반환. PyInstaller exe에서도 동작."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def _captures_dir():
+    """캡처 이미지 저장 폴더. 없으면 자동 생성."""
+    path = os.path.join(_app_dir(), "captures")
+    os.makedirs(path, exist_ok=True)
+    return path
+
 # ────────── 설정 ──────────
 DEFAULT_START_KEY = "f6"
 DEFAULT_RECORD_KEY = "f3"
@@ -37,7 +50,7 @@ class RegionSelector:
     def __init__(self, callback, mode="region", save_dir=None):
         self.callback = callback
         self.mode = mode
-        self.save_dir = save_dir or tempfile.gettempdir()
+        self.save_dir = save_dir or _captures_dir()
         self.start_x = self.start_y = 0
         self.rect = None
 
@@ -1362,7 +1375,7 @@ class DetectSetupDialog:
     def _capture_image(self):
         self.win.grab_release()
         self.win.withdraw()
-        save_dir = os.path.dirname(self._img_path_var.get().strip()) or tempfile.gettempdir()
+        save_dir = os.path.dirname(self._img_path_var.get().strip()) or _captures_dir()
         self.win.after(400, lambda: RegionSelector(self._on_image_captured, mode="capture",
                                                     save_dir=save_dir))
 

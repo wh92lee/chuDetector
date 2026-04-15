@@ -595,7 +595,7 @@ class CheDetect:
             self.tree.insert("", "end", values=(i + 1, r["name"], content, yes_label, no_label, conf_label))
 
     def _add_record(self):
-        RecordDialog(self.root, self.records, None, self._refresh_table)
+        RecordDialog(self.root, self.records, None, self._refresh_table, self.region)
 
     def _add_loop_record(self):
         LoopRecordDialog(self.root, self.records, None, self._refresh_table)
@@ -631,7 +631,7 @@ class CheDetect:
         elif rtype == "loop":
             LoopRecordDialog(self.root, self.records, idx, self._refresh_table)
         else:
-            RecordDialog(self.root, self.records, idx, self._refresh_table)
+            RecordDialog(self.root, self.records, idx, self._refresh_table, self.region)
 
     def _delete_record(self):
         selected = self.tree.selection()
@@ -860,12 +860,23 @@ class CheDetect:
             current_idx = next_idx
             time.sleep(SCAN_INTERVAL)
 
+    def _resolve_region(self, record, region_key):
+        """레코드 영역 좌표를 절대좌표로 반환 (relative 플래그 지원)"""
+        region = record.get(region_key)
+        if not region:
+            return self.region
+        if record.get("region_relative") and self.region:
+            ox, oy = self.region[0], self.region[1]
+            return (region[0] + ox, region[1] + oy,
+                    region[2] + ox, region[3] + oy)
+        return region
+
     def _find_image(self, record):
         """이미지를 화면에서 찾아 (x1,y1,x2,y2) 반환, 없으면 None"""
         if not record.get("image_path") or not os.path.exists(record["image_path"]):
             return None
         try:
-            x1, y1, x2, y2 = record.get("image_region") or self.region
+            x1, y1, x2, y2 = self._resolve_region(record, "image_region")
             screenshot = _grab_region(x1, y1, x2, y2)
             screen = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
@@ -887,11 +898,10 @@ class CheDetect:
 
     def _find_color(self, record):
         """색상을 color_region에서 찾아 클릭 좌표 반환, 없으면 None"""
-        region = record.get("color_region")
-        if not region:
+        if not record.get("color_region"):
             return None
         try:
-            x1, y1, x2, y2 = region
+            x1, y1, x2, y2 = self._resolve_region(record, "color_region")
             screenshot = _grab_region(x1, y1, x2, y2)
             img = np.array(screenshot)
             r, g, b = record["color_rgb"]
@@ -929,11 +939,12 @@ class CheDetect:
 
 # ────────── 레코드 편집 다이얼로그 ──────────
 class RecordDialog:
-    def __init__(self, parent, records, edit_idx, refresh_callback):
+    def __init__(self, parent, records, edit_idx, refresh_callback, main_region=None):
         self.parent = parent
         self.records = records
         self.edit_idx = edit_idx
         self.refresh_callback = refresh_callback
+        self.main_region = main_region  # 메인 박스 영역 (상대좌표 변환용)
         self.count = len(records)
         self._preview_img = None
 
@@ -1178,20 +1189,30 @@ class RecordDialog:
             messagebox.showerror("오류", "감지 방식을 등록하세요.", parent=self.win)
             return
 
+        def _to_relative(abs_region):
+            """절대좌표 → 메인 박스 기준 상대좌표 변환"""
+            if abs_region and self.main_region:
+                ox, oy = self.main_region[0], self.main_region[1]
+                return [abs_region[0] - ox, abs_region[1] - oy,
+                        abs_region[2] - ox, abs_region[3] - oy]
+            return abs_region
+
         if d and d["type"] == "color":
             record = {
                 "type": "color",
-                "color_region": d["region"],
+                "color_region": _to_relative(d["region"]),
                 "color_rgb": d["rgb"],
                 "color_tolerance": d.get("tolerance", 20),
+                "region_relative": self.main_region is not None,
                 **common,
             }
         elif d and d["type"] == "image":
             record = {
                 "type": "image",
-                "image_region": d["region"],
+                "image_region": _to_relative(d["region"]),
                 "image_path": d.get("image_path", ""),
                 "confidence": d.get("confidence", DEFAULT_CONFIDENCE),
+                "region_relative": self.main_region is not None,
                 **common,
             }
         else:

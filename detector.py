@@ -834,7 +834,7 @@ class CheDetect:
                         time.sleep(random.uniform(record.get("wait_min", 0), record.get("wait_max", 0)))
                     next_idx = record["yes_to"]
                 else:
-                    found = self._find_image(record)
+                    found, max_val = self._find_image(record)
                     if found:
                         cx = (found[0] + found[2]) // 2
                         cy = (found[1] + found[3]) // 2
@@ -849,8 +849,11 @@ class CheDetect:
                         elif wait_type == "random":
                             time.sleep(random.uniform(record.get("wait_min", 0), record.get("wait_max", 0)))
                     else:
-                        self.root.after(0, lambda r=record, i=current_idx:
-                                        self.status_var.set(f"▶ [{i+1}] {r['name']} - NO"))
+                        conf_pct = int(record.get("confidence", DEFAULT_CONFIDENCE) * 100)
+                        mv_pct = int(max_val * 100)
+                        self.root.after(0, lambda r=record, i=current_idx, mv=mv_pct, c=conf_pct:
+                                        self.status_var.set(
+                                            f"▶ [{i+1}] {r['name']} - NO (유사도:{mv}% / 기준:{c}%)"))
                         next_idx = record["no_to"]
 
             if next_idx is None:
@@ -872,9 +875,11 @@ class CheDetect:
         return region
 
     def _find_image(self, record):
-        """이미지를 화면에서 찾아 (x1,y1,x2,y2) 반환, 없으면 None"""
-        if not record.get("image_path") or not os.path.exists(record["image_path"]):
-            return None
+        """이미지를 화면에서 찾아 (x1,y1,x2,y2, max_val) 반환, 없으면 (None, max_val)"""
+        if not record.get("image_path"):
+            return None, 0.0
+        if not os.path.exists(record["image_path"]):
+            return None, 0.0
         try:
             x1, y1, x2, y2 = self._resolve_region(record, "image_region")
             screenshot = _grab_region(x1, y1, x2, y2)
@@ -882,19 +887,28 @@ class CheDetect:
 
             template = cv2.imread(record["image_path"])
             if template is None:
-                return None
+                return None, 0.0
+
+            th, tw = template.shape[:2]
+            sh, sw = screen.shape[:2]
+            if tw > sw or th > sh:
+                self.root.after(0, lambda tw=tw, th=th, sw=sw, sh=sh:
+                    self.status_var.set(
+                        f"⚠ 이미지 감지 오류: 템플릿({tw}x{th})이 감지 영역({sw}x{sh})보다 큽니다"))
+                return None, 0.0
 
             result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
             if max_val >= record["confidence"]:
-                th, tw = template.shape[:2]
                 mx, my = max_loc
-                # 영역 좌표로 변환
-                return (x1 + mx, y1 + my, x1 + mx + tw, y1 + my + th)
+                return (x1 + mx, y1 + my, x1 + mx + tw, y1 + my + th), max_val
+            return None, max_val
         except Exception as e:
+            err = str(e)
+            self.root.after(0, lambda err=err: self.status_var.set(f"⚠ 이미지 감지 오류: {err}"))
             print(f"이미지 감지 오류: {e}")
-        return None
+        return None, 0.0
 
     def _find_color(self, record):
         """색상을 color_region에서 찾아 클릭 좌표 반환, 없으면 None"""
